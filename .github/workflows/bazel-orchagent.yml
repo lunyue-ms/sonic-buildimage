@@ -1,0 +1,90 @@
+name: Bazel orchagent
+
+# Dedicated workflow that builds the docker-orchagent image with Bazel
+# (the combo BAZEL_ORCHAGENT path), independent of the make-based platform CI.
+#
+# It runs the same Bazel target the combo glue uses
+# (//dockers/docker-orchagent:load) inside the reproducible
+# sonic-bazel-builder:bookworm container. The Bazel build is hermetic (it pulls
+# its own toolchain + libyang 1.0.73), so it is unaffected by the make-side
+# build environment of upstream master.
+
+on:
+  push:
+    branches:
+      - bazel-orchagent-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-orchagent-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bazel-orchagent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Free disk space on /
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo apt-get clean || true
+          echo "After:"; df -h /
+
+      - name: Move docker data-root to /mnt (more space)
+        run: |
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo rm -rf /var/lib/docker
+          sudo systemctl start docker
+          docker info | grep -i "docker root" || true
+          df -h /mnt
+
+      - name: Checkout (recursive submodules over HTTPS)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Build the bazel-builder image
+        run: docker build -t sonic-bazel-builder:bookworm tools/bazel-builder/
+
+      - name: Bazel build + load docker-orchagent
+        run: |
+          mkdir -p /mnt/bazelhome
+          sudo chmod 0777 /mnt/bazelhome
+          docker run --rm \
+            -v "$PWD":/src:ro \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /mnt/bazelhome:/bazelhome \
+            -e HOME=/bazelhome \
+            -w /src \
+            --user 0:0 \
+            sonic-bazel-builder:bookworm \
+            bash -eo pipefail -c '
+              bazel version
+              echo "=== bazel build //dockers/docker-orchagent:load ==="
+              bazel build //dockers/docker-orchagent:load
+              echo "=== bazel run //dockers/docker-orchagent:load (load into dockerd) ==="
+              bazel run //dockers/docker-orchagent:load
+            '
+
+      - name: Export docker-orchagent image to .gz
+        run: |
+          docker images | grep -i orchagent || true
+          docker save docker-orchagent:latest | gzip > docker-orchagent.gz
+          ls -lh docker-orchagent.gz
+
+      - name: Upload docker-orchagent.gz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-orchagent-gz
+          path: docker-orchagent.gz
+          retention-days: 7

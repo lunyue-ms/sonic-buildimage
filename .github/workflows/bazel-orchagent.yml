@@ -71,9 +71,11 @@ jobs:
             bash -eo pipefail -c '
               bazel version
               echo "=== bazel build //dockers/docker-orchagent:load ==="
-              bazel build //dockers/docker-orchagent:load
+              bazel build //dockers/docker-orchagent:load \
+                --jobs=6 --experimental_reuse_sandbox_directories
               echo "=== bazel run //dockers/docker-orchagent:load (load into dockerd) ==="
-              bazel run //dockers/docker-orchagent:load
+              bazel run //dockers/docker-orchagent:load \
+                --jobs=6 --experimental_reuse_sandbox_directories
             '
 
       - name: Export docker-orchagent image to .gz

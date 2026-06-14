@@ -58,7 +58,7 @@ jobs:
 
       - name: Bazel build + load docker-orchagent
         run: |
-          mkdir -p /mnt/bazelhome
+          sudo mkdir -p /mnt/bazelhome
           sudo chmod 0777 /mnt/bazelhome
           docker run --rm \
             -v "$PWD":/src:ro \

@@ -120,6 +120,17 @@ $(TARGET_PATH)/$(DOCKER_ORCHAGENT): .platform docker-start
 	@# DOCKER_HOST = unix:///var/run/docker.sock) can find it.
 	docker load -i $(TARGET_PATH)/$(DOCKER_ORCHAGENT_STEM)-bazel.tar $(LOG)
 	@rm -f $(TARGET_PATH)/$(DOCKER_ORCHAGENT_STEM)-bazel.tar $(LOG)
+	@# Step 3.5 (combo): bazel's oci_image lacks the com.azure.sonic.manifest
+	@# label that SONiC image assembly (sonic_debian_extension.j2) requires on
+	@# every container image. Generate the manifest and bake it into the image
+	@# as a thin layer, the same way slave.mk does for make-built images.
+	$(call generate_manifest,$(DOCKER_ORCHAGENT_STEM))
+	BAZEL_LBL_CTX=$$(mktemp -d) && printf 'FROM %s\n' '$(BAZEL_ORCHAGENT_IMAGE)' > $$BAZEL_LBL_CTX/Dockerfile && \
+	  docker build \
+	    --label com.azure.sonic.manifest="$$(cat $($(DOCKER_ORCHAGENT)_PATH)/manifest.json)" \
+	    --label Tag=$(SONIC_IMAGE_VERSION) \
+	    -t $(BAZEL_ORCHAGENT_IMAGE) $$BAZEL_LBL_CTX $(LOG) && \
+	  rm -rf $$BAZEL_LBL_CTX
 	@# Step 4: retag and let the standard SONiC pipeline finalize the .gz.
 	docker tag $(BAZEL_ORCHAGENT_IMAGE) $(DOCKER_ORCHAGENT_STEM)-$(DOCKER_USERNAME):$(DOCKER_USERTAG) $(LOG)
 	$(call docker-image-save,$(DOCKER_ORCHAGENT_STEM),$@)

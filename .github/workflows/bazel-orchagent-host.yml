@@ -1,0 +1,108 @@
+name: Bazel orchagent (host-direct)
+
+# Variant of bazel-orchagent.yml that runs `bazel build` DIRECTLY on the
+# runner host -- no sonic-bazel-builder container. This mirrors the intended
+# combo flow where only the bazel build step is host-side and the later
+# glue/assembly stays in make (rules/late/docker-orchagent-bazel.mk).
+#
+# Requires a host with glibc >= 2.36 (the upstream Bazel rules pull bookworm
+# libstdc++ which needs arc4random@GLIBC_2.36), hence runs-on: ubuntu-24.04.
+# The full list of host packages this installs is documented in
+# analysis/bazel-host-build-deps.md.
+
+on:
+  push:
+    branches:
+      - bazel-orchagent-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-orchagent-host-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bazel-orchagent-host:
+    # ubuntu-24.04 ships glibc 2.39 (>= 2.36 required by bookworm libstdc++).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Free disk space on /
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo apt-get clean || true
+          echo "After:"; df -h /
+
+      - name: Move docker data-root to /mnt (more space for :load image)
+        run: |
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo rm -rf /var/lib/docker
+          sudo systemctl start docker
+          docker info | grep -i "docker root" || true
+          df -h /mnt
+
+      - name: Install Bazel + build deps on host (no builder container)
+        run: |
+          set -euo pipefail
+          # bazelisk -> /usr/bin/bazel (already on PATH; pulls bazel 8.5.1)
+          sudo curl -fL -o /usr/bin/bazel \
+            https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64
+          sudo chmod +x /usr/bin/bazel
+          # Build dependencies. See analysis/bazel-host-build-deps.md for the
+          # rationale behind each package. NOTE: no JDK -- bazelisk's bazel
+          # bundles its own JRE.
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git build-essential pkg-config make patch \
+            python3 python3-pip python3-yaml \
+            zip unzip xz-utils \
+            clang llvm-18 llvm-18-dev \
+            flex bison \
+            libicu-dev libncurses-dev libpcre2-dev libxml2-dev \
+            aspell aspell-en
+          echo "=== versions ==="
+          /usr/bin/bazel --version || true
+          ldd --version | head -1
+          clang --version | head -1 || true
+
+      - name: Checkout (recursive submodules over HTTPS)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Bazel build + load docker-orchagent (host-direct)
+        env:
+          HOME: /mnt/bazelhome
+        run: |
+          set -eo pipefail
+          sudo mkdir -p /mnt/bazelhome
+          sudo chown "$(id -u):$(id -g)" /mnt/bazelhome
+          bazel version
+          echo "=== bazel build //dockers/docker-orchagent:load ==="
+          bazel build //dockers/docker-orchagent:load \
+            --jobs=6 --experimental_reuse_sandbox_directories
+          echo "=== bazel run //dockers/docker-orchagent:load (load into dockerd) ==="
+          bazel run //dockers/docker-orchagent:load \
+            --jobs=6 --experimental_reuse_sandbox_directories
+
+      - name: Export docker-orchagent image to .gz
+        run: |
+          docker images | grep -i orchagent || true
+          docker save docker-orchagent:latest | gzip > docker-orchagent.gz
+          ls -lh docker-orchagent.gz
+
+      - name: Upload docker-orchagent.gz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-orchagent-gz-host
+          path: docker-orchagent.gz
+          retention-days: 7

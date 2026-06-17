@@ -103,11 +103,10 @@ jobs:
       - name: Host pre-build orchagent image (bazel host-direct; placeholder while debugging glue)
         env:
           HOME: /mnt/bazelhome
-          # TEMP: while debugging the make/glue plumbing, use a placeholder image
-          # instead of the ~20min bazel build (the glue is image-agnostic: it just
-          # save/load/manifest/gz's whatever docker-orchagent:latest is). Flip to
-          # "0" for the final end-to-end run that proves the real bazel image.
-          USE_PLACEHOLDER_ORCHAGENT: "1"
+          # Final end-to-end run: real bazel host-direct build (set to "0").
+          # Set to "1" to use a busybox placeholder and skip the ~20min bazel
+          # while iterating on the make/glue plumbing (glue is image-agnostic).
+          USE_PLACEHOLDER_ORCHAGENT: "0"
         run: |
           set -eo pipefail
           if [ "${USE_PLACEHOLDER_ORCHAGENT:-0}" = "1" ]; then

@@ -1,0 +1,132 @@
+name: Bazel orchagent (combo, host-direct)
+
+# End-to-end proof of the intended official-pipeline flow:
+#   1. Build the docker-orchagent image with bazel DIRECTLY on the 24.04 host
+#      (no sonic-bazel-builder container) -> image lands on the host dockerd.
+#   2. Run the normal SONiC make glue with BAZEL_ORCHAGENT=y
+#      BAZEL_ORCHAGENT_PREBUILT=y so rules/late/docker-orchagent-bazel.mk
+#      consumes that host image (skips the builder) and finalizes
+#      target/docker-orchagent.gz the same way the official pipeline would.
+#
+# This mirrors what we'd add to .azure-pipelines on the official PR: a host
+# pre-build step + BAZEL_ORCHAGENT(_PREBUILT)=y on the make invocation, with
+# everything else (glue, image assembly) unchanged. Requires glibc >= 2.36,
+# hence ubuntu-24.04 (the official sonicso1ES-amd64 pool is also 24.04).
+
+on:
+  push:
+    branches:
+      - bazel-orchagent-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-orchagent-combo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bazel-orchagent-combo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Free disk space on /
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo apt-get clean || true
+          echo "After:"; df -h /
+
+      - name: Move docker data-root to /mnt (more space)
+        run: |
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo rm -rf /var/lib/docker
+          sudo systemctl start docker
+          docker info | grep -i "docker root" || true
+          df -h /mnt
+
+      - name: Install Bazel + build deps on host (no builder container)
+        run: |
+          set -euo pipefail
+          sudo curl -fL -o /usr/bin/bazel \
+            https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64
+          sudo chmod +x /usr/bin/bazel
+          # See analysis/bazel-host-build-deps.md for the rationale per package.
+          # `acl` is also needed by the SONiC make flow (setfacl on the slave).
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git build-essential pkg-config make patch \
+            python3 python3-pip python3-yaml \
+            zip unzip xz-utils \
+            clang llvm-18 llvm-18-dev \
+            flex bison \
+            libicu-dev libncurses-dev libpcre2-dev libxml2-dev \
+            aspell aspell-en acl
+          sudo modprobe overlay || true
+          /usr/bin/bazel --version || true
+          ldd --version | head -1
+
+      - name: Checkout (recursive submodules over HTTPS)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Host pre-build orchagent image via bazel (host-direct)
+        env:
+          HOME: /mnt/bazelhome
+        run: |
+          set -eo pipefail
+          sudo mkdir -p /mnt/bazelhome
+          sudo chown "$(id -u):$(id -g)" /mnt/bazelhome
+          bazel version
+          echo "=== bazel run //dockers/docker-orchagent:load (host-direct -> host dockerd) ==="
+          bazel run //dockers/docker-orchagent:load \
+            --jobs=6 --experimental_reuse_sandbox_directories
+          echo "=== verify image is on the host dockerd ==="
+          docker image inspect docker-orchagent:latest >/dev/null \
+            && echo "OK: docker-orchagent:latest present on host dockerd"
+          docker images | grep -i orchagent || true
+
+      - name: make configure (vs platform, pull docker base)
+        run: |
+          set -eo pipefail
+          ENABLE_DOCKER_BASE_PULL=y make configure PLATFORM=vs
+
+      - name: make combo orchagent.gz (consume host image via PREBUILT=y)
+        run: |
+          set -eo pipefail
+          make USERNAME=admin SONIC_BUILD_JOBS=$(nproc) \
+            BAZEL_ORCHAGENT=y BAZEL_ORCHAGENT_PREBUILT=y \
+            target/docker-orchagent.gz
+          echo "=== result ==="
+          ls -lh target/docker-orchagent.gz
+
+      - name: Upload docker-orchagent.gz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-orchagent-combo-gz
+          path: target/docker-orchagent.gz
+          retention-days: 7
+
+      - name: Collect make logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/combo-logs
+          find target -name "*.log" -exec cp {} /tmp/combo-logs/ \; 2>/dev/null || true
+          ls -la /tmp/combo-logs || true
+
+      - name: Upload make logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: combo-make-logs
+          path: /tmp/combo-logs
+          retention-days: 7
+          if-no-files-found: ignore

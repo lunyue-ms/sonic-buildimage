@@ -61,3 +61,14 @@
 - 容器版包清单：`tools/bazel-builder/Dockerfile`
 - host 安装参考：Bojun-Feng/sonic-bazel-scripts `01_install_bazel.sh`（Ubuntu 24.04 host 安装脚本）
 - glibc 要求出处：`tools/bazel-builder/README.md`
+
+## combo workflow 追加的包
+
+`.github/workflows/bazel-orchagent-combo.yml`（host 预构建 bazel 镜像 + `make BAZEL_ORCHAGENT=y
+BAZEL_ORCHAGENT_PREBUILT=y target/docker-orchagent.gz`）在上面 host-direct 清单基础上**多装一个**：
+
+| 包 | 用途 |
+|----|------|
+| `acl` | SONiC make 流程对 slave 容器用 `setfacl`（官方 build-template.yml 也 `sudo apt-get install -y acl`） |
+
+其余依赖与 host-direct 完全一致。combo workflow 还 `sudo modprobe overlay`（SONiC make 的 overlay 存储驱动需要）。

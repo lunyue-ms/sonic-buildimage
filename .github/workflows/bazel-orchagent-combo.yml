@@ -41,6 +41,19 @@ jobs:
           sudo apt-get clean || true
           echo "After:"; df -h /
 
+      - name: Add swap (slave image build/export is memory-heavy on 16GB runners)
+        run: |
+          # The sonic-slave-bookworm build installs gcc/rust/go/llvm/texlive and
+          # exporting its multi-GB layers spikes memory; the default ~4GB swap is
+          # not enough and the runner got a shutdown signal (OOM). Add 32G swap
+          # on the 145GB disk to absorb the spike.
+          sudo fallocate -l 32G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=32768
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+          swapon --show
+
       - name: Move docker data-root to /mnt (more space)
         run: |
           sudo systemctl stop docker docker.socket || true

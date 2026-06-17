@@ -71,7 +71,7 @@ BAZEL_ORCHAGENT_PREBUILT=y target/docker-orchagent.gz`）在上面 host-direct �
 |----|------|
 | `acl` | SONiC make 流程对 slave 容器用 `setfacl`（官方 build-template.yml 也 `sudo apt-get install -y acl`） |
 | `wget` | SONiC make 部分脚本用 wget 拉取 |
-| `j2cli`（pip，提供 `j2`） | **关键**：SONiC make 用 `j2` 渲染 `Dockerfile.j2` 和各种 `*.j2` 配置；官方 1ES agent 自带，bare runner 必须 `sudo pip3 install --break-system-packages j2cli` |
+| `j2`（pip `jinjanator`） | **关键**：SONiC make 用 `j2` 渲染 `Dockerfile.j2` 和各种 `*.j2` 配置。官方 `scripts/prerequisites.sh` 装的是 `jinjanator`（j2cli 维护 fork，提供 `j2`，兼容 Python 3.12）；老的 `j2cli==0.3.10` 在 24.04 的 Python 3.12 上 `import imp` 直接崩。装法：`sudo pip3 install --break-system-packages jinjanator` |
 
 其余依赖与 host-direct 完全一致。combo workflow 还会：
 - `sudo modprobe overlay`（SONiC make 的 overlay 存储驱动需要）

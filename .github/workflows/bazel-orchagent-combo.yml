@@ -69,14 +69,16 @@ jobs:
             libicu-dev libncurses-dev libpcre2-dev libxml2-dev \
             aspell aspell-en acl
           # SONiC make host tooling (present on the official 1ES agent, absent
-          # on a bare runner): j2cli renders Dockerfile.j2 and the *.j2 configs
-          # that `make configure` and the slave image build depend on.
-          sudo pip3 install --break-system-packages j2cli
+          # on a bare runner): the official scripts/prerequisites.sh installs
+          # `jinjanator` (a maintained j2cli fork providing `j2`) -- the old
+          # j2cli 0.3.10 imports the `imp` module removed in Python 3.12 (24.04).
+          sudo pip3 install --break-system-packages jinjanator
           # SONiC version cache dir (avoids 'mkdir /var/cache/sonic: Permission denied').
           sudo mkdir -p /var/cache/sonic && sudo chmod 1777 /var/cache/sonic
           sudo modprobe overlay || true
           /usr/bin/bazel --version || true
           ldd --version | head -1
+          j2 --version || true
           j2 --version || true
 
       - name: Checkout (recursive submodules over HTTPS)
@@ -85,17 +87,28 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Host pre-build orchagent image via bazel (host-direct)
+      - name: Host pre-build orchagent image (bazel host-direct; placeholder while debugging glue)
         env:
           HOME: /mnt/bazelhome
+          # TEMP: while debugging the make/glue plumbing, use a placeholder image
+          # instead of the ~20min bazel build (the glue is image-agnostic: it just
+          # save/load/manifest/gz's whatever docker-orchagent:latest is). Flip to
+          # "0" for the final end-to-end run that proves the real bazel image.
+          USE_PLACEHOLDER_ORCHAGENT: "1"
         run: |
           set -eo pipefail
-          sudo mkdir -p /mnt/bazelhome
-          sudo chown "$(id -u):$(id -g)" /mnt/bazelhome
-          bazel version
-          echo "=== bazel run //dockers/docker-orchagent:load (host-direct -> host dockerd) ==="
-          bazel run //dockers/docker-orchagent:load \
-            --jobs=6 --experimental_reuse_sandbox_directories
+          if [ "${USE_PLACEHOLDER_ORCHAGENT:-0}" = "1" ]; then
+            echo "=== PLACEHOLDER mode: tag busybox as docker-orchagent:latest (skips bazel) ==="
+            docker pull busybox:latest
+            docker tag busybox:latest docker-orchagent:latest
+          else
+            sudo mkdir -p /mnt/bazelhome
+            sudo chown "$(id -u):$(id -g)" /mnt/bazelhome
+            bazel version
+            echo "=== bazel run //dockers/docker-orchagent:load (host-direct -> host dockerd) ==="
+            bazel run //dockers/docker-orchagent:load \
+              --jobs=6 --experimental_reuse_sandbox_directories
+          fi
           echo "=== verify image is on the host dockerd ==="
           docker image inspect docker-orchagent:latest >/dev/null \
             && echo "OK: docker-orchagent:latest present on host dockerd"

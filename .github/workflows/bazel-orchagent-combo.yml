@@ -63,14 +63,21 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git build-essential pkg-config make patch \
             python3 python3-pip python3-yaml \
-            zip unzip xz-utils \
+            zip unzip xz-utils wget \
             clang llvm-18 llvm-18-dev \
             flex bison \
             libicu-dev libncurses-dev libpcre2-dev libxml2-dev \
             aspell aspell-en acl
+          # SONiC make host tooling (present on the official 1ES agent, absent
+          # on a bare runner): j2cli renders Dockerfile.j2 and the *.j2 configs
+          # that `make configure` and the slave image build depend on.
+          sudo pip3 install --break-system-packages j2cli
+          # SONiC version cache dir (avoids 'mkdir /var/cache/sonic: Permission denied').
+          sudo mkdir -p /var/cache/sonic && sudo chmod 1777 /var/cache/sonic
           sudo modprobe overlay || true
           /usr/bin/bazel --version || true
           ldd --version | head -1
+          j2 --version || true
 
       - name: Checkout (recursive submodules over HTTPS)
         uses: actions/checkout@v4

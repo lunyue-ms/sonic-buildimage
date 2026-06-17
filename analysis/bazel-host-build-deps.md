@@ -70,5 +70,11 @@ BAZEL_ORCHAGENT_PREBUILT=y target/docker-orchagent.gz`）在上面 host-direct �
 | 包 | 用途 |
 |----|------|
 | `acl` | SONiC make 流程对 slave 容器用 `setfacl`（官方 build-template.yml 也 `sudo apt-get install -y acl`） |
+| `wget` | SONiC make 部分脚本用 wget 拉取 |
+| `j2cli`（pip，提供 `j2`） | **关键**：SONiC make 用 `j2` 渲染 `Dockerfile.j2` 和各种 `*.j2` 配置；官方 1ES agent 自带，bare runner 必须 `sudo pip3 install --break-system-packages j2cli` |
 
-其余依赖与 host-direct 完全一致。combo workflow 还 `sudo modprobe overlay`（SONiC make 的 overlay 存储驱动需要）。
+其余依赖与 host-direct 完全一致。combo workflow 还会：
+- `sudo modprobe overlay`（SONiC make 的 overlay 存储驱动需要）
+- `sudo mkdir -p /var/cache/sonic && sudo chmod 1777 /var/cache/sonic`（SONiC version cache 目录，否则 `mkdir /var/cache/sonic: Permission denied`）
+
+> 注：这些"SONiC make host 依赖"（j2cli/wget/acl/overlay/var-cache）在官方 `sonicso1ES-amd64` agent 上**本来就有**（它是 SONiC 构建镜像）。只有在 bare GitHub Actions runner 上才需要手动补。

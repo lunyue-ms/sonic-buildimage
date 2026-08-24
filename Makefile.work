@@ -204,8 +204,24 @@ export SONIC_VERSION_CACHE SONIC_VERSION_CACHE_SOURCE
 $(shell test -d $(SONIC_VERSION_CACHE_SOURCE) || \
     mkdir -p $(SONIC_VERSION_CACHE_SOURCE) && chmod -f 777 $(SONIC_VERSION_CACHE_SOURCE) 2>/dev/null )
 
+ifneq ($(strip $(SONIC_BAZEL_REMOTE_CACHE_CONFIG)),)
+SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH := $(realpath $(SONIC_BAZEL_REMOTE_CACHE_CONFIG))
+ifeq ($(SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH),)
+$(error SONIC_BAZEL_REMOTE_CACHE_CONFIG does not exist: $(SONIC_BAZEL_REMOTE_CACHE_CONFIG))
+endif
+ifeq ($(shell test -f "$(SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH)" && echo y),)
+$(error SONIC_BAZEL_REMOTE_CACHE_CONFIG is not a file: $(SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH))
+endif
+endif
+
 $(shell test -d $(SONIC_BAZEL_CACHE_SOURCE) || \
     mkdir -p $(SONIC_BAZEL_CACHE_SOURCE) && chmod -f 777 $(SONIC_BAZEL_CACHE_SOURCE) 2>/dev/null )
+
+ifneq ($(strip $(SONIC_BAZEL_REMOTE_CACHE_CONFIG)),)
+ifeq ($(shell test -d "$(SONIC_BAZEL_CACHE_SOURCE)" && echo y),)
+$(error SONIC_BAZEL_CACHE_SOURCE could not be created or is not a directory: $(SONIC_BAZEL_CACHE_SOURCE))
+endif
+endif
 
 # Generate the version control build info
 $(shell \
@@ -460,6 +476,9 @@ ifneq ($(wildcard $(SONIC_BAZEL_CACHE_SOURCE)),)
 	# Apply the slave Bazel cache config as a system RC file, which Bazel reads regardless of cwd.
 	# Ref: https://bazel.build/run/bazelrc#bazelrc-file-locations
 	DOCKER_RUN += -v "$(PWD)/tools/bazel/slave.bazelrc:/etc/bazel.bazelrc:ro"
+ifneq ($(SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH),)
+	DOCKER_RUN += -v "$(SONIC_BAZEL_REMOTE_CACHE_CONFIG_REALPATH):/etc/sonic-bazel-remote.bazelrc:ro"
+endif
 endif
 
 # User name and tag for "docker-*" images created by native dockerd mode.

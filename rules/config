@@ -171,6 +171,10 @@ SONIC_DPKG_CACHE_SOURCE ?= /var/cache/sonic/artifacts
 #   - Disk cache: https://bazel.build/remote/caching#disk-cache
 SONIC_BAZEL_CACHE_SOURCE ?= $(SONIC_DPKG_CACHE_SOURCE)/bazel
 
+# Optional host-side bazelrc containing environment-specific remote-cache
+# settings and credentials. It is mounted read-only into the slave container.
+SONIC_BAZEL_REMOTE_CACHE_CONFIG ?=
+
 # Build eligible dockers (those registered in SONIC_BAZEL_DOCKER_IMAGES) with
 # Bazel instead of the legacy `docker build` flow.
 # When disabled, fall back to the normal Make docker build.

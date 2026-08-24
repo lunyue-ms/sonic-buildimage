@@ -25,3 +25,5 @@ startup --output_user_root=/bazel_cache/output_user_root
 common --repository_cache=/bazel_cache/repository_cache
 common --disk_cache=/bazel_cache/disk_cache
 
+# Optional CI-provided remote-cache configuration.
+try-import /etc/sonic-bazel-remote.bazelrc

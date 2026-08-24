@@ -215,6 +215,7 @@ SONIC_INSTALL_DOCKER_IMAGES += $(SOME_DOCKER) # install it into the final image
 Two configuration knobs in **rules/config** control this flow:
 * **BUILD_WITH_BAZEL_WHEN_AVAILABLE** (default `n`): When set to `y`, eligible dockers are built with Bazel rather than the legacy `docker build` flow.
 * **SONIC_BAZEL_CACHE_SOURCE** (default `$(SONIC_DPKG_CACHE_SOURCE)/bazel`): Host directory used to persist Bazel's disk and repository caches across slave container runs. Will be mounted into the slave as a volume.
+* **SONIC_BAZEL_REMOTE_CACHE_CONFIG** (default empty): Optional host-side bazelrc mounted read-only into sonic-slave. It is intended for environment-specific remote-cache settings and credentials. Do not commit credentials into the repository.
 
 ## Tips & Tricks
 Although every target is built inside a sonic-slave container, which exits at the end of build, you can enter bash of sonic-slave using this command:

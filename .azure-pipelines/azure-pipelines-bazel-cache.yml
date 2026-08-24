@@ -1,0 +1,118 @@
+pr: none
+trigger: none
+
+name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+resources:
+  repositories:
+  - repository: buildimage
+    type: github
+    name: lunyue-ms/sonic-buildimage
+    endpoint: sonic-net
+    ref: refs/heads/bazel-remote-cache-e2e
+
+variables:
+- group: SONiC-Bazel-Cache
+- template: .azure-pipelines/azure-pipelines-repd-build-variables.yml@buildimage
+- template: .azure-pipelines/template-variables.yml@buildimage
+- name: ENABLE_FIPS
+  value: y
+- name: BUILD_BRANCH
+  value: $(Build.SourceBranchName)
+
+stages:
+- stage: BuildVS
+  pool: sonicso1ES-amd64
+  jobs:
+  - template: azure-pipelines-build.yml
+    parameters:
+      buildOptions: >-
+        USERNAME=admin
+        BUILD_WITH_BAZEL_WHEN_AVAILABLE=y
+        NOBOOKWORM=1
+        NOTRIXIE=0
+        BUILD_MULTIASIC_KVM=y
+        INCLUDE_DHCP_SERVER=y
+        SONIC_BAZEL_CACHE_SOURCE=$(Agent.TempDirectory)/sonic-bazel-cache/$(Build.BuildId)
+        SONIC_BAZEL_REMOTE_CACHE_CONFIG=$(Agent.TempDirectory)/sonic-bazel-remote.bazelrc
+        DOCKER_BUILDER_USER_MOUNT=$(Agent.TempDirectory)/bazel-remote-certs:/etc/sonic-bazel-certs:ro
+        ${{ variables.VERSION_CONTROL_OPTIONS }}
+      preSteps:
+      - task: DownloadSecureFile@1
+        name: bazelCacheCerts
+        displayName: Download Bazel cache client certificates
+        inputs:
+          secureFile: sonic-bazel-cache-ci-certs.tar.gz
+      - bash: |
+          set -euo pipefail
+          umask 077
+
+          cert_dir="$(Agent.TempDirectory)/bazel-remote-certs"
+          cache_dir="$(Agent.TempDirectory)/sonic-bazel-cache/$(Build.BuildId)"
+          remote_bazelrc="$(Agent.TempDirectory)/sonic-bazel-remote.bazelrc"
+
+          mkdir -p "$cert_dir" "$cache_dir"
+          tar -xzf "$(bazelCacheCerts.secureFilePath)" -C "$cert_dir"
+
+          for cert_file in server-ca.crt writer-client.crt writer-client.key; do
+              if [[ ! -f "$cert_dir/$cert_file" ]]; then
+                  echo "Missing required certificate file: $cert_file" >&2
+                  exit 1
+              fi
+          done
+          chmod 0600 "$cert_dir/writer-client.key"
+
+          cache_url="$(BAZEL_REMOTE_CACHE_URL)"
+          if [[ "$cache_url" != grpcs://* ]]; then
+              echo "BAZEL_REMOTE_CACHE_URL must use grpcs://" >&2
+              exit 1
+          fi
+          cache_authority="${cache_url#grpcs://}"
+          cache_authority="${cache_authority%%/*}"
+          cache_host="${cache_authority%%:*}"
+          cache_port="${cache_authority##*:}"
+          if [[ -z "$cache_host" || "$cache_port" == "$cache_authority" || ! "$cache_port" =~ ^[0-9]+$ ]]; then
+              echo "BAZEL_REMOTE_CACHE_URL must include a host and numeric port" >&2
+              exit 1
+          fi
+
+          tls_output="$(Agent.TempDirectory)/bazel-remote-tls.txt"
+          if ! timeout 30 openssl s_client \
+              -connect "$cache_host:$cache_port" \
+              -servername "$cache_host" \
+              -CAfile "$cert_dir/server-ca.crt" \
+              -cert "$cert_dir/writer-client.crt" \
+              -key "$cert_dir/writer-client.key" \
+              -verify_return_error \
+              -alpn h2 \
+              </dev/null >"$tls_output" 2>&1; then
+              cat "$tls_output" >&2
+              echo "Bazel remote cache TLS handshake failed" >&2
+              exit 1
+          fi
+          if ! grep -q "Verify return code: 0 (ok)" "$tls_output"; then
+              cat "$tls_output" >&2
+              echo "Bazel remote cache server certificate verification failed" >&2
+              exit 1
+          fi
+          if ! grep -q "ALPN protocol: h2" "$tls_output"; then
+              cat "$tls_output" >&2
+              echo "Bazel remote cache did not negotiate HTTP/2 with ALPN" >&2
+              exit 1
+          fi
+
+          cat >"$remote_bazelrc" <<EOF
+          common --remote_cache=$(BAZEL_REMOTE_CACHE_URL)
+          common --remote_instance_name=sonic-buildimage/e2e/trixie-amd64
+          common --remote_upload_local_results=true
+          common --remote_accept_cached=true
+          common --remote_verify_downloads=true
+          common --remote_timeout=120
+          common --remote_retries=5
+          common --tls_certificate=/etc/sonic-bazel-certs/server-ca.crt
+          common --tls_client_certificate=/etc/sonic-bazel-certs/writer-client.crt
+          common --tls_client_key=/etc/sonic-bazel-certs/writer-client.key
+          EOF
+        displayName: Configure and verify Bazel remote cache
+      jobGroups:
+      - name: vs

@@ -1,6 +1,12 @@
 pr: none
 trigger: none
 
+parameters:
+- name: cacheOnly
+  displayName: Validate Bazel cache only (skip SONiC build)
+  type: boolean
+  default: false
+
 name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
 resources:
@@ -21,7 +27,143 @@ variables:
   value: $(Build.SourceBranchName)
 
 stages:
+- ${{ if eq(parameters.cacheOnly, true) }}:
+  - stage: CacheValidation
+    pool: sonicso1ES-amd64
+    jobs:
+    - job: CacheSmokeTest
+      timeoutInMinutes: 15
+      steps:
+      - checkout: self
+        fetchDepth: 1
+        submodules: false
+      - task: DownloadSecureFile@1
+        name: bazelCacheCerts
+        displayName: Download Bazel cache client certificates
+        inputs:
+          secureFile: sonic-bazel-cache-ci-certs.tar.gz
+      - bash: |
+          set -euo pipefail
+          umask 077
+
+          for tool in curl tar jq sha256sum cmp awk; do
+              if ! command -v "$tool" >/dev/null; then
+                  echo "Missing required Agent tool: $tool" >&2
+                  exit 1
+              fi
+          done
+          if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+              echo "The cache smoke test requires a Linux x86_64 Agent" >&2
+              exit 1
+          fi
+          if [[ ! "$BAZEL_REMOTE_CACHE_URL" =~ ^grpcs://[^/:]+:[0-9]+(/.*)?$ ]]; then
+              echo "BAZEL_REMOTE_CACHE_URL must use grpcs:// with a host and port" >&2
+              exit 1
+          fi
+
+          probe_root="$(mktemp -d "$AGENT_TEMPDIRECTORY/bazel-cache-smoke.XXXXXXXX")"
+          trap 'rm -rf "$probe_root"' EXIT
+          cert_dir="$probe_root/certs"
+          mkdir -p "$cert_dir" "$probe_root/workspace"
+          tar -xzf "$CLIENT_CERT_ARCHIVE" -C "$cert_dir"
+          for cert_file in server-ca.crt writer-client.crt writer-client.key; do
+              if [[ ! -s "$cert_dir/$cert_file" ]]; then
+                  echo "Missing or empty certificate file: $cert_file" >&2
+                  exit 1
+              fi
+          done
+          chmod 0600 "$cert_dir/writer-client.key"
+
+          bazel_version="$(tr -d '\r\n' < .bazelversion)"
+          if [[ ! "$bazel_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo ".bazelversion must contain a pinned release version" >&2
+              exit 1
+          fi
+          bazel_url="https://releases.bazel.build/$bazel_version/release/bazel-$bazel_version-linux-x86_64"
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 \
+              "$bazel_url" -o "$probe_root/bazel"
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 60 \
+              "$bazel_url.sha256" -o "$probe_root/bazel.sha256"
+          bazel_sha="$(awk 'NR == 1 { print $1 }' "$probe_root/bazel.sha256")"
+          if [[ ! "$bazel_sha" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo "Invalid Bazel release checksum" >&2
+              exit 1
+          fi
+          printf '%s  %s\n' "$bazel_sha" "$probe_root/bazel" | sha256sum --check
+          chmod 0700 "$probe_root/bazel"
+
+          # A new action per CI attempt prevents a hit on an earlier run's result.
+          nonce="$(basename "$probe_root")"
+          printf 'workspace(name = "cache_smoke")\n' > "$probe_root/workspace/WORKSPACE"
+          cat > "$probe_root/workspace/BUILD.bazel" <<EOF
+          genrule(
+              name = "probe",
+              outs = ["probe.txt"],
+              cmd = "echo '$nonce' > \$@",
+          )
+          EOF
+          printf '%s\n' "$nonce" > "$probe_root/expected.txt"
+          cd "$probe_root/workspace"
+
+          cache_flags=(
+              --enable_bzlmod=false
+              --enable_workspace=true
+              --incompatible_autoload_externally=
+              --disk_cache=
+              --repository_cache=
+              "--remote_cache=$BAZEL_REMOTE_CACHE_URL"
+              --remote_instance_name=sonic-buildimage/e2e/trixie-amd64
+              --remote_cache_async=false
+              --remote_verify_downloads=true
+              --remote_download_outputs=all
+              --remote_timeout=30
+              --remote_retries=1
+              "--tls_certificate=$cert_dir/server-ca.crt"
+              "--tls_client_certificate=$cert_dir/writer-client.crt"
+              "--tls_client_key=$cert_dir/writer-client.key"
+          )
+          for mode in write read; do
+              accept_cached=false
+              upload_results=true
+              if [[ "$mode" == read ]]; then
+                  accept_cached=true
+                  upload_results=false
+              fi
+              echo "Cache smoke test: $mode"
+              "$probe_root/bazel" --batch --ignore_all_rc_files \
+                  "--output_user_root=$probe_root/$mode-root" \
+                  "--output_base=$probe_root/$mode-output" \
+                  build //:probe "${cache_flags[@]}" \
+                  "--remote_accept_cached=$accept_cached" \
+                  "--remote_upload_local_results=$upload_results" \
+                  "--execution_log_json_file=$probe_root/$mode.json"
+              cmp "$probe_root/expected.txt" bazel-bin/probe.txt
+          done
+
+          if ! jq -se 'map(select(.mnemonic == "Genrule")) |
+              length == 1 and (.[0].cacheHit // false) == false and
+              (.[0].exitCode // 0) == 0 and (.[0].status // "") == ""' \
+              "$probe_root/write.json"; then
+              echo "The first probe did not execute successfully without a cache hit" >&2
+              exit 1
+          fi
+          if ! jq -se 'map(select(.mnemonic == "Genrule")) |
+              length == 1 and .[0].cacheHit == true and
+              .[0].runner == "remote cache hit" and
+              (.[0].exitCode // 0) == 0 and (.[0].status // "") == ""' \
+              "$probe_root/read.json"; then
+              echo "The clean second build did not produce a remote cache hit" >&2
+              exit 1
+          fi
+          jq -s 'map(select(.mnemonic == "Genrule") | {runner, cacheHit})' \
+              "$probe_root/read.json"
+          echo "PASS: authenticated cache upload, remote cache hit, and correct downloaded output"
+        displayName: Verify Bazel cache upload and clean-build remote hit
+        env:
+          BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)
+          CLIENT_CERT_ARCHIVE: $(bazelCacheCerts.secureFilePath)
 - stage: BuildVS
+  condition: and(succeeded(), eq('${{ parameters.cacheOnly }}', 'false'))
   pool: sonicso1ES-amd64
   jobs:
   - template: azure-pipelines-build.yml

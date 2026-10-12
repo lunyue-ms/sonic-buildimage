@@ -2,15 +2,12 @@
 
 Pipeline 3430 uses `.azure-pipelines/azure-pipelines-bazel-cache.yml`.
 This dedicated `lunyue/songqing-bazel-warm-cache-ci` branch defaults
-`nativeTarget` to `sonic-vs-bin` while full VS closed-loop validation is running.
-A temporary batched GitHub push trigger is restricted to this branch and changes
-to `.azure-pipelines/azure-pipelines-bazel-cache.yml` or `tools/bazel/ci/*`; PR
-triggers remain disabled.
-This uses pipeline 3430's existing GitHub connection, without changing Azure
-authentication or permissions. Restore `trigger: none` after validation. Select
-`docker-sysmgr` explicitly for the Docker benchmark or `none` for the existing
-`cacheOnly`/Make modes. The original `lunyue/songqing-bazel-cache-ci` branch remains
-unchanged.
+`nativeTarget` to `docker-sysmgr`. Push and PR triggers are disabled.
+Select `sonic-vs-bin` explicitly for the full VS build or `none` for the existing
+`cacheOnly`/Make modes. The temporary branch/path-scoped GitHub trigger used for
+authorized full VS validation has been disabled after the successful run. It
+used pipeline 3430's existing connection without changing authentication or
+permissions. The original `lunyue/songqing-bazel-cache-ci` branch remains unchanged.
 
 For native builds, set `cacheOnly=false` and select:
 
@@ -91,12 +88,37 @@ and generates byte-identical headers at short, five-digit and seven-digit IDs
 with the corrected prefix. This changes neither kernel source/configuration nor
 timeouts, cache settings or certificate isolation.
 
-## Run
+## Verified full VS result
 
-During full VS validation, an authorized push that changes the CI YAML or native
-CI inputs on this branch queues a full VS build with `cacheOnly=false` and
-`nativeTarget=sonic-vs-bin`. Confirm the actual run's source revision in pipeline
-3430 before manually queueing another run.
+Run [1246182](https://dev.azure.com/mssonic/build/_build/results?buildId=1246182)
+succeeded on 2026-10-12 (UTC), using control commit
+`6bfeb154295e6ecd4fe5d28eb0286193797ff2c1` and Agent 33. The native job,
+installer verification and artifact publication passed; legacy `BuildVS` was
+skipped. Product source and the controlled patch match the recorded provenance.
+
+| Measurement | Result |
+| --- | --- |
+| CI runtime, excluding queue | 10,973.094 seconds (3h 2m 53s) |
+| Queue | 344.350 seconds (5m 44s) |
+| Bazel reported elapsed | 10,731.572 seconds (2h 58m 52s, rounded) |
+| Complete Bazel process | 10,737 seconds |
+| BEP wall / analysis / execution | 10,728.942 / 1,135.331 / 9,573.616 seconds |
+| Remote / sandbox / local / internal runners | 14,990 / 1,157 / 1 / 7,933 |
+| Published installer size | 1,881,622,511 bytes |
+
+Artifact `native-bazel-sonic-vs-bin` contains the installer and filtered
+provenance, installer-validation, cache-statistics and command-timing evidence.
+Installer payload SHA1, embedded ZIP equality and ZIP CRC passed. Its SHA256 is
+`419452b4f7984a7fb1289f198d674110b8c9e4fe812586de12cadeff20f7890b`.
+
+The remote hit fraction among execution spawns is 14,990 / 16,148 = 92.829%;
+internal actions are not compile spawns. This is not a cost-weighted ratio:
+the kernel action still executed locally and its progress exceeded 7,800 seconds.
+The run used a different Agent from the failed full VS attempts, but still had
+cold misses. It is the first successful full VS CI, not a second fully warmed VS
+benchmark or a boot/runtime test.
+
+## Run
 
 For an explicitly selected Docker benchmark, choose this branch in **Run
 pipeline** or use an authenticated CLI:

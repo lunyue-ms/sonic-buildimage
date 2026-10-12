@@ -6,6 +6,14 @@ parameters:
   displayName: Validate Bazel cache only (skip SONiC build)
   type: boolean
   default: false
+- name: nativeTarget
+  displayName: Songqing native Bazel target (none keeps the existing modes)
+  type: string
+  default: none
+  values:
+  - none
+  - docker-sysmgr
+  - sonic-vs-bin
 
 name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
@@ -27,7 +35,7 @@ variables:
   value: $(Build.SourceBranchName)
 
 stages:
-- ${{ if eq(parameters.cacheOnly, true) }}:
+- ${{ if and(eq(parameters.cacheOnly, true), eq(parameters.nativeTarget, 'none')) }}:
   - stage: CacheValidation
     pool: sonicso1ES-amd64
     jobs:
@@ -162,8 +170,47 @@ stages:
         env:
           BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)
           CLIENT_CERT_ARCHIVE: $(bazelCacheCerts.secureFilePath)
+- ${{ if ne(parameters.nativeTarget, 'none') }}:
+  - stage: NativeBazel
+    displayName: Songqing native Bazel build and remote cache
+    pool: sonicso1ES-amd64
+    jobs:
+    - job: NativeBuild
+      timeoutInMinutes: 360
+      steps:
+      - checkout: self
+        fetchDepth: 1
+        submodules: false
+      - bash: |
+          set -euo pipefail
+          if [[ "${CACHE_ONLY,,}" == true ]]; then
+              echo "Set cacheOnly=false when selecting a nativeTarget" >&2
+              exit 1
+          fi
+        displayName: Validate native build selection
+        env:
+          CACHE_ONLY: ${{ format('{0}', parameters.cacheOnly) }}
+      - task: DownloadSecureFile@1
+        name: nativeCacheCerts
+        displayName: Download native Bazel cache client certificates
+        inputs:
+          secureFile: sonic-bazel-cache-ci-certs.tar.gz
+      - bash: |
+          set -euo pipefail
+          bash tools/bazel/ci/songqing_native.sh "$NATIVE_TARGET"
+        displayName: Build songqing target and verify remote cache
+        env:
+          NATIVE_TARGET: ${{ parameters.nativeTarget }}
+          BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)
+          CLIENT_CERT_ARCHIVE: $(nativeCacheCerts.secureFilePath)
+          NATIVE_RESULTS_DIR: $(Agent.TempDirectory)/native-bazel-results/$(Build.BuildId)
+      - task: PublishPipelineArtifact@1
+        displayName: Publish native build outputs and cache evidence
+        inputs:
+          targetPath: $(Agent.TempDirectory)/native-bazel-results/$(Build.BuildId)
+          artifact: native-bazel-${{ parameters.nativeTarget }}
 - stage: BuildVS
-  condition: and(succeeded(), eq('${{ parameters.cacheOnly }}', 'false'))
+  condition: and(succeeded(), eq('${{ parameters.cacheOnly }}', 'false'), eq('${{ parameters.nativeTarget }}', 'none'))
   pool: sonicso1ES-amd64
   jobs:
   - template: azure-pipelines-build.yml

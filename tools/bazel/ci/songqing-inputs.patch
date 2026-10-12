@@ -1,0 +1,69 @@
+diff --git a/src/monit/BUILD.bazel b/src/monit/BUILD.bazel
+--- a/src/monit/BUILD.bazel
++++ b/src/monit/BUILD.bazel
+@@ -63,5 +63,8 @@ genrule(
+            "export M4=$$(echo $$RF/rules_m4*/bin/m4); " +
+            "export BISON_PKGDATADIR=$$(echo $$RF/rules_bison*/data); " +
+            "$$BISON -y -d -o $(location y.tab.c) $<"),
+-    tools = ["@sonic_build_infra//kernel/tools:bison_bin"],
++    tools = [
++        "@sonic_build_infra//kernel/tools:bison_bin",
++        "@sonic_build_infra//kernel/tools:m4_bin",
++    ],
+ )
+diff --git a/src/sonic-dash-ha/Cargo.toml b/src/sonic-dash-ha/Cargo.toml
+--- a/src/sonic-dash-ha/Cargo.toml
++++ b/src/sonic-dash-ha/Cargo.toml
+@@ -99,7 +99,7 @@ swbus-actor = { version = "0.1.0", path = "crates/swbus-actor" }
+ sonicdb-derive = { version = "0.1.0", path = "crates/sonicdb-derive" }
+ sonic-dash-api-proto = { version = "0.1.0", path = "crates/sonic-dash-api-proto" }
+-swss-common = { git = "https://github.com/sonic-net/sonic-swss-common.git", branch = "master" }
+-swss-common-testing = { git = "https://github.com/sonic-net/sonic-swss-common.git", branch = "master" }
++swss-common = { git = "https://github.com/sonic-net/sonic-swss-common.git", rev = "60a1716be38d648c634ebffab547bbd5a67c8ef8" }
++swss-common-testing = { git = "https://github.com/sonic-net/sonic-swss-common.git", rev = "60a1716be38d648c634ebffab547bbd5a67c8ef8" }
+
+ # Dev dependencies
+ criterion = "0.5"
+diff --git a/src/sonic-dash-ha/Cargo.lock b/src/sonic-dash-ha/Cargo.lock
+--- a/src/sonic-dash-ha/Cargo.lock
++++ b/src/sonic-dash-ha/Cargo.lock
+@@ -2197,7 +2197,7 @@ dependencies = [
+ [[package]]
+ name = "swss-common"
+ version = "0.1.0"
+-source = "git+https://github.com/sonic-net/sonic-swss-common.git#69e396afc795bb3c40dddb7b7cc40da822a73efb"
++source = "git+https://github.com/sonic-net/sonic-swss-common.git?rev=60a1716be38d648c634ebffab547bbd5a67c8ef8#60a1716be38d648c634ebffab547bbd5a67c8ef8"
+ dependencies = [
+  "bindgen",
+  "getset",
+@@ -2232,7 +2232,7 @@ dependencies = [
+ [[package]]
+ name = "swss-common-testing"
+ version = "0.1.0"
+-source = "git+https://github.com/sonic-net/sonic-swss-common.git#69e396afc795bb3c40dddb7b7cc40da822a73efb"
++source = "git+https://github.com/sonic-net/sonic-swss-common.git?rev=60a1716be38d648c634ebffab547bbd5a67c8ef8#60a1716be38d648c634ebffab547bbd5a67c8ef8"
+ dependencies = [
+  "lazy_static",
+  "rand",
+diff --git a/src/sonic-swss/Cargo.toml b/src/sonic-swss/Cargo.toml
+--- a/src/sonic-swss/Cargo.toml
++++ b/src/sonic-swss/Cargo.toml
+@@ -89,5 +89,5 @@ reqwest-tracing = { version = "0.5", features = ["opentelemetry_0_25"] }
+ # SONiC specific dependencies
+-swss-common = { git = "https://github.com/sonic-net/sonic-swss-common.git", branch = "master" }
++swss-common = { git = "https://github.com/sonic-net/sonic-swss-common.git", rev = "60a1716be38d648c634ebffab547bbd5a67c8ef8" }
+
+ # Development dependencies
+ tempfile = "3.12"
+diff --git a/src/sonic-swss/Cargo.lock b/src/sonic-swss/Cargo.lock
+--- a/src/sonic-swss/Cargo.lock
++++ b/src/sonic-swss/Cargo.lock
+@@ -2331,7 +2331,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+ [[package]]
+ name = "swss-common"
+ version = "0.1.0"
+-source = "git+https://github.com/sonic-net/sonic-swss-common.git#69e396afc795bb3c40dddb7b7cc40da822a73efb"
++source = "git+https://github.com/sonic-net/sonic-swss-common.git?rev=60a1716be38d648c634ebffab547bbd5a67c8ef8#60a1716be38d648c634ebffab547bbd5a67c8ef8"
+ dependencies = [
+  "bindgen",
+  "getset",

@@ -11,7 +11,7 @@ For native builds, set `cacheOnly=false` and select:
 | `nativeTarget` | Build and proof |
 | --- | --- |
 | `docker-sysmgr` | Build the native OCI target once with remote reads and writes enabled, fresh output roots and disk cache disabled; require remote hits from an earlier CI run and checksum-verify the OCI output. |
-| `sonic-vs-bin` | Build the full VS/amd64 installer with remote reads and writes, verify its payload and ZIP, and publish the installer plus cache statistics. |
+| `sonic-vs-bin` | Build the full VS/amd64 installer once with remote reads and writes, require remote hits through lightweight build-event metrics, verify its payload and ZIP, and publish the installer plus cache statistics. |
 
 The YAML repository is the CI control plane, not the product source. Each native
 job fetches public `songqing-sq/sonic-buildimage` commit
@@ -33,15 +33,23 @@ The warm build uses `--remote_accept_cached=true` and
 `--remote_upload_local_results=true`, so misses execute locally and populate
 the server.
 
-`cache-validation.json` records Bazel wall, analysis and execution times plus
-runner counts from Bazel 8.6.0's build-event protocol. It requires a successful
+`cache-validation.json` (Docker) or `cache-statistics.json` (VS) records Bazel
+wall, analysis and execution times plus runner counts from Bazel 8.6.0's
+build-event protocol. It requires a successful
 finished event, positive remote hits and no disk-cache hits. The benchmark
 does not generate the large per-spawn JSON logs whose repeated parsing took
 about 40 minutes in run 1245568. It does not claim per-C++ action digest proof;
 that remains the separate cold/write-read gate on the original branch.
-`warm-command-timing.json` also records the complete Bazel process wall time,
-including startup and shutdown, at one-second resolution. BEP timing excludes
-some startup/shutdown overhead; keep these measurements distinct.
+`warm-command-timing.json` (Docker) or `vs-command-timing.json` (VS) also records
+the complete Bazel process wall time, including startup and shutdown, at
+one-second resolution. BEP timing excludes some startup/shutdown overhead;
+keep these measurements distinct.
+
+The VS target is `//platform/vs:sonic-vs-bin`: kernel, initrd, host rootfs,
+30 OCI image targets (3 bases and 27 runtime images), Docker store, SquashFS
+and ONIE installer. The first full VS CI can reuse cached common actions from
+the Docker runs, but additional components may still compile locally. It is
+not a fully warmed VS benchmark, and it does not boot or deploy the image.
 
 The comparison baseline is run 1245568: the forced-local write build took
 2976.141 seconds, while its same-job clean-output remote read took 134.238

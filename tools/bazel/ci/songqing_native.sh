@@ -135,10 +135,6 @@ build_flags=(
 )
 build_pass() {
     local pass="$1" accept_cached="$2" upload_results="$3"
-    local log_flag="--execution_log_json_file=$run_root/$pass.json"
-    if [[ "$pass" == warm ]]; then
-        log_flag="--build_event_json_file=$run_root/$pass.bep.json"
-    fi
     local started=$SECONDS
     echo "Native Bazel pass: $pass"
     "$run_root/bazel" --batch --nosystem_rc --nohome_rc \
@@ -148,7 +144,7 @@ build_pass() {
         build "$label" "${build_flags[@]}" \
         "--remote_accept_cached=$accept_cached" \
         "--remote_upload_local_results=$upload_results" \
-        "$log_flag"
+        "--build_event_json_file=$run_root/$pass.bep.json"
     local command_seconds=$(( SECONDS - started ))
     echo "Bazel invocation wall seconds: $command_seconds"
     printf '{"bazel_invocation_wall_seconds": %d}\n' "$command_seconds" \
@@ -168,7 +164,7 @@ else
     build_pass vs true true
     python3 "$script_dir/verify_songqing.py" installer bazel-bin/platform/vs/sonic-vs.bin \
         bazel-bin/platform/vs/fs.zip "$NATIVE_RESULTS_DIR/installer-validation.json"
-    python3 "$script_dir/verify_songqing.py" stats "$run_root/vs.json" \
+    python3 "$script_dir/verify_songqing.py" warm "$run_root/vs.bep.json" \
         "$NATIVE_RESULTS_DIR/cache-statistics.json"
     cp --reflink=auto bazel-bin/platform/vs/sonic-vs.bin "$NATIVE_RESULTS_DIR/sonic-vs.bin"
 fi

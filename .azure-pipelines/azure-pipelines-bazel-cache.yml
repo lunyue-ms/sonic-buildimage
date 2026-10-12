@@ -1,5 +1,12 @@
 pr: none
-trigger: none
+trigger:
+  batch: true
+  branches:
+    include:
+    - lunyue/songqing-bazel-warm-cache-ci
+  paths:
+    include:
+    - .azure-pipelines/azure-pipelines-bazel-cache.yml
 
 parameters:
 - name: cacheOnly
@@ -9,7 +16,7 @@ parameters:
 - name: nativeTarget
   displayName: Songqing native Bazel target (none keeps the existing modes)
   type: string
-  default: docker-sysmgr
+  default: sonic-vs-bin
   values:
   - none
   - docker-sysmgr

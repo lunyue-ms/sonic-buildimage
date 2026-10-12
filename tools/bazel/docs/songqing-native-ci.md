@@ -2,9 +2,14 @@
 
 Pipeline 3430 uses `.azure-pipelines/azure-pipelines-bazel-cache.yml`.
 This dedicated `lunyue/songqing-bazel-warm-cache-ci` branch defaults
-`nativeTarget` to `docker-sysmgr`. All triggers remain disabled. Select `none`
-explicitly to use the existing `cacheOnly` or Make `BuildVS` modes. The original
-`lunyue/songqing-bazel-cache-ci` branch remains unchanged.
+`nativeTarget` to `sonic-vs-bin` while full VS closed-loop validation is running.
+A temporary batched GitHub push trigger is restricted to this branch and changes
+to `.azure-pipelines/azure-pipelines-bazel-cache.yml`; PR triggers remain disabled.
+This uses pipeline 3430's existing GitHub connection, without changing Azure
+authentication or permissions. Restore `trigger: none` after validation. Select
+`docker-sysmgr` explicitly for the Docker benchmark or `none` for the existing
+`cacheOnly`/Make modes. The original `lunyue/songqing-bazel-cache-ci` branch remains
+unchanged.
 
 For native builds, set `cacheOnly=false` and select:
 
@@ -76,8 +81,13 @@ sandbox path and the locally validated timeout scale.
 
 ## Run
 
-After explicitly authorizing publication and pushing the test branch, either
-select it in **Run pipeline**, or queue the same run with an authenticated CLI:
+During full VS validation, an authorized push that changes the CI YAML on this
+branch queues a full VS build with `cacheOnly=false` and
+`nativeTarget=sonic-vs-bin`. Confirm the actual run's source revision in pipeline
+3430 before manually queueing another run.
+
+For an explicitly selected Docker benchmark, choose this branch in **Run
+pipeline** or use an authenticated CLI:
 
 ```bash
 az pipelines run \
@@ -86,7 +96,7 @@ az pipelines run \
   --parameters cacheOnly=false nativeTarget=docker-sysmgr
 ```
 
-After the Docker/cache gate succeeds, select `nativeTarget=sonic-vs-bin`.
+For a manually queued full VS run, select `nativeTarget=sonic-vs-bin`.
 Prefer `--commit-id <published-CI-commit>` to pin the queued YAML revision.
 Do not publish or queue additional runs without authorization.
 

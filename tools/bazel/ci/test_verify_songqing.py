@@ -217,6 +217,28 @@ class NativeVerificationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Unsupported native target", result.stderr)
 
+    def test_controlled_patch_passes_p4c_bison_toolchain_environment(self):
+        target = self.root / "src/p4lang/p4c-native-bazel.patch"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            "@@ -22,4 +22,5 @@ def _genyacc_impl(ctx):\n"
+            "-    ctx.actions.run_shell(\n"
+            "+    ctx.actions.run(\n"
+            "         use_default_shell_env = True,\n"
+            "-        command = \"bison \" + \" \".join(args),\n"
+            "+        executable = ctx.toolchains[\"@rules_bison//bison:toolchain_type\"]"
+            ".bison_toolchain.bison_tool,\n"
+            "+        arguments = args,\n"
+            "         inputs = ctx.files.src,\n"
+        )
+        patch = pathlib.Path(__file__).with_name("songqing-inputs.patch")
+        command = ["/usr/bin/git", "apply", "--include=src/p4lang/p4c-native-bazel.patch", str(patch)]
+        subprocess.run(command, cwd=self.root, check=True, capture_output=True, text=True)
+        result = target.read_text()
+        self.assertIn("-        use_default_shell_env = True,\n", result)
+        self.assertIn(".bison_toolchain.bison_env,\n", result)
+        self.assertIn("+        arguments = args,\n", result)
+
 
 if __name__ == "__main__":
     unittest.main()

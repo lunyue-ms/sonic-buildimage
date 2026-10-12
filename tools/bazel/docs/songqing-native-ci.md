@@ -26,6 +26,14 @@ tool dependency and pins Rust `swss-common` to the locally tested commit
 are pinned so `master` cannot change between cache passes. Their checksums are
 checked after each build. Artifacts record source, control and patch revisions.
 
+The controlled patch also fixes P4C's custom Yacc action to pass
+`BisonToolchainInfo.bison_env` instead of the host shell environment. This
+declares the M4/runfiles environment required by `rules_bison`, without
+installing host M4 or changing parser/compiler versions. Full VS run 1245971
+exposed the omission in `ir_generator_yacc`; an isolated local build reproduced
+the exact error with unusable host M4, then passed with the toolchain environment.
+The P4C patch checksum is checked after the build alongside the Cargo inputs.
+
 There is no cold compilation or second build within this job. The isolated HOME,
 source, output roots and repository cache are created afresh for each invocation;
 CI pool allocation decides the Agent VM. The cache instance stays unchanged.

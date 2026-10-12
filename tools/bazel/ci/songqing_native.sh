@@ -94,6 +94,7 @@ fi
 git apply --check "$script_dir/songqing-inputs.patch"
 git apply "$script_dir/songqing-inputs.patch"
 sha256sum src/sonic-dash-ha/Cargo.{toml,lock} src/sonic-swss/Cargo.{toml,lock} \
+    src/p4lang/p4c-native-bazel.patch \
     > "$run_root/source-inputs.sha256"
 
 bazel_version="$(tr -d '\r\n' < .bazelversion)"

@@ -1,3 +1,15 @@
+diff --git a/src/p4lang/p4c-native-bazel.patch b/src/p4lang/p4c-native-bazel.patch
+--- a/src/p4lang/p4c-native-bazel.patch
++++ b/src/p4lang/p4c-native-bazel.patch
+@@ -276,6 +276,7 @@
+ +    ctx.actions.run(
+-         use_default_shell_env = True,
++-        use_default_shell_env = True,
+ -        command = "bison " + " ".join(args),
+ +        executable = ctx.toolchains["@rules_bison//bison:toolchain_type"].bison_toolchain.bison_tool,
+++        env = ctx.toolchains["@rules_bison//bison:toolchain_type"].bison_toolchain.bison_env,
+ +        arguments = args,
+          inputs = ctx.files.src,
 diff --git a/src/monit/BUILD.bazel b/src/monit/BUILD.bazel
 --- a/src/monit/BUILD.bazel
 +++ b/src/monit/BUILD.bazel

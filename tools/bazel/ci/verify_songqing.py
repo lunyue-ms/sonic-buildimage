@@ -28,7 +28,7 @@ def records(path):
                     if eof:
                         raise
                 else:
-                    require(isinstance(record, dict), "Expected a SpawnExec object")
+                    require(isinstance(record, dict), "Expected a JSON object")
                     yield record
                     pending = pending[end:]
                     continue
@@ -81,6 +81,41 @@ def verify_cache(write_log, read_log, write_image, read_image):
         "read_runners": statistics(read_log),
         "matching_hits": hits,
         "oci_image_matches": True,
+    }
+
+
+def verify_warm_build(path):
+    finished = []
+    metrics = []
+    for event in records(path):
+        if "finished" in event:
+            finished.append(event["finished"])
+        if "buildMetrics" in event:
+            metrics.append(event["buildMetrics"])
+    require(len(finished) == 1 and finished[0].get("overallSuccess") is True,
+            "Expected one successful Bazel build-finished event")
+    require(len(metrics) == 1, "Expected one Bazel build-metrics event")
+    summary = metrics[0]["actionSummary"]
+    runners = collections.Counter()
+    for runner in summary["runnerCount"]:
+        if runner["name"] == "total":
+            continue
+        count = int(runner["count"])
+        require(count >= 0, "Invalid runner count")
+        runners[runner["name"]] += count
+    require(not runners["disk cache hit"], "Warm build used disk cache")
+    require(runners["remote cache hit"] > 0,
+            "No cross-run remote cache hits; local fallback is not proof")
+    timing = metrics[0]["timingMetrics"]
+    wall_ms = int(timing["wallTimeInMs"])
+    require(wall_ms > 0, "Missing positive Bazel wall time")
+    return {
+        "bazel_wall_seconds": wall_ms / 1000,
+        "analysis_seconds": int(timing.get("analysisPhaseTimeInMs", 0)) / 1000,
+        "execution_seconds": int(timing.get("executionPhaseTimeInMs", 0)) / 1000,
+        "actions_executed": int(summary["actionsExecuted"]),
+        "remote_cache_hits": runners["remote cache hit"],
+        "runners": dict(sorted((name, count) for name, count in runners.items() if count)),
     }
 
 
@@ -193,6 +228,8 @@ def main():
     mode, *args = sys.argv[1:]
     if mode == "cache" and len(args) == 5:
         result = verify_cache(*args[:-1])
+    elif mode == "warm" and len(args) == 2:
+        result = verify_warm_build(args[0])
     elif mode == "oci" and len(args) == 2:
         result = verify_oci(args[0])
     elif mode == "installer" and len(args) == 3:
@@ -200,7 +237,7 @@ def main():
     elif mode == "stats" and len(args) == 2:
         result = statistics(args[0])
     else:
-        raise ValueError("Expected cache, oci, installer or stats arguments")
+        raise ValueError("Expected cache, warm, oci, installer or stats arguments")
     text = json.dumps(result, indent=2) + "\n"
     pathlib.Path(args[-1]).write_text(text)
     print(text, end="")

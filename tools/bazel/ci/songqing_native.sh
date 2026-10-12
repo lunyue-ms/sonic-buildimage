@@ -135,6 +135,11 @@ build_flags=(
 )
 build_pass() {
     local pass="$1" accept_cached="$2" upload_results="$3"
+    local log_flag="--execution_log_json_file=$run_root/$pass.json"
+    if [[ "$pass" == warm ]]; then
+        log_flag="--build_event_json_file=$run_root/$pass.bep.json"
+    fi
+    local started=$SECONDS
     echo "Native Bazel pass: $pass"
     "$run_root/bazel" --batch --nosystem_rc --nohome_rc \
         "--bazelrc=$remote_rc" \
@@ -143,20 +148,20 @@ build_pass() {
         build "$label" "${build_flags[@]}" \
         "--remote_accept_cached=$accept_cached" \
         "--remote_upload_local_results=$upload_results" \
-        "--execution_log_json_file=$run_root/$pass.json"
+        "$log_flag"
+    local command_seconds=$(( SECONDS - started ))
+    echo "Bazel invocation wall seconds: $command_seconds"
+    printf '{"bazel_invocation_wall_seconds": %d}\n' "$command_seconds" \
+        > "$NATIVE_RESULTS_DIR/$pass-command-timing.json"
     sha256sum --check "$run_root/source-inputs.sha256"
 }
 
 if [[ "$target" == docker-sysmgr ]]; then
-    build_pass write false true
-    python3 "$script_dir/verify_songqing.py" oci \
-        bazel-bin/dockers/docker-sysmgr/docker-sysmgr "$NATIVE_RESULTS_DIR/write-image.json"
-    build_pass read true false
-    python3 "$script_dir/verify_songqing.py" oci \
-        bazel-bin/dockers/docker-sysmgr/docker-sysmgr "$NATIVE_RESULTS_DIR/read-image.json"
-    python3 "$script_dir/verify_songqing.py" cache "$run_root/write.json" "$run_root/read.json" \
-        "$NATIVE_RESULTS_DIR/write-image.json" "$NATIVE_RESULTS_DIR/read-image.json" \
+    build_pass warm true true
+    python3 "$script_dir/verify_songqing.py" warm "$run_root/warm.bep.json" \
         "$NATIVE_RESULTS_DIR/cache-validation.json"
+    python3 "$script_dir/verify_songqing.py" oci \
+        bazel-bin/dockers/docker-sysmgr/docker-sysmgr "$NATIVE_RESULTS_DIR/image-validation.json"
     tar -czhf "$NATIVE_RESULTS_DIR/docker-sysmgr.oci.tar.gz" \
         -C bazel-bin/dockers/docker-sysmgr/docker-sysmgr .
 else

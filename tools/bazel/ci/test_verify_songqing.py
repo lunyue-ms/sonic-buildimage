@@ -88,6 +88,57 @@ class NativeVerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify.statistics(path)
 
+    def warm_events(self):
+        return [
+            {"finished": {"overallSuccess": True}},
+            {"buildMetrics": {
+                "actionSummary": {
+                    "actionsExecuted": "6",
+                    "runnerCount": [
+                        {"name": "total", "count": 6},
+                        {"name": "remote cache hit", "count": 3},
+                        {"name": "internal", "count": 2},
+                        {"name": "processwrapper-sandbox", "count": 1},
+                    ],
+                },
+                "timingMetrics": {
+                    "wallTimeInMs": "10000",
+                    "analysisPhaseTimeInMs": "6000",
+                    "executionPhaseTimeInMs": "4000",
+                },
+            }},
+        ]
+
+    def test_warm_build_cache_counts_and_timings(self):
+        result = verify.verify_warm_build(self.execution_log("warm.json", self.warm_events()))
+        self.assertEqual(result["remote_cache_hits"], 3)
+        self.assertEqual(result["actions_executed"], 6)
+        self.assertEqual(result["bazel_wall_seconds"], 10)
+        self.assertEqual(result["analysis_seconds"], 6)
+        self.assertEqual(result["execution_seconds"], 4)
+        self.assertEqual(result["runners"]["processwrapper-sandbox"], 1)
+        self.assertNotIn("total", result["runners"])
+
+    def test_warm_build_requires_success_and_complete_metrics(self):
+        for events in ([], self.warm_events()[:1], self.warm_events()[1:],
+                       [{"finished": {"overallSuccess": False}}, self.warm_events()[1]],
+                       self.warm_events() + [self.warm_events()[1]]):
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                verify.verify_warm_build(self.execution_log("warm.json", events))
+
+    def test_warm_build_rejects_disk_cache_no_remote_hits_and_invalid_metrics(self):
+        for runner in ({"name": "disk cache hit", "count": 3},
+                       {"name": "processwrapper-sandbox", "count": 3},
+                       {"name": "remote cache hit", "count": -1}):
+            events = self.warm_events()
+            events[1]["buildMetrics"]["actionSummary"]["runnerCount"] = [runner]
+            with self.subTest(runner=runner), self.assertRaises(ValueError):
+                verify.verify_warm_build(self.execution_log("warm.json", events))
+        events = self.warm_events()
+        events[1]["buildMetrics"]["timingMetrics"]["wallTimeInMs"] = "0"
+        with self.assertRaises(ValueError):
+            verify.verify_warm_build(self.execution_log("warm.json", events))
+
     def make_oci(self):
         layout = self.root / "oci"
         (layout / "blobs/sha256").mkdir(parents=True)

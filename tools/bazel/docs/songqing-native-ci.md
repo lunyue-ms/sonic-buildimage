@@ -1,14 +1,16 @@
-# Songqing native Bazel CI
+# Songqing native Bazel cross-run cache benchmark
 
 Pipeline 3430 uses `.azure-pipelines/azure-pipelines-bazel-cache.yml`.
-All triggers remain disabled. The new `nativeTarget` parameter defaults to
-`none`, preserving the existing `cacheOnly` and Make `BuildVS` modes.
+This dedicated `lunyue/songqing-bazel-warm-cache-ci` branch defaults
+`nativeTarget` to `docker-sysmgr`. All triggers remain disabled. Select `none`
+explicitly to use the existing `cacheOnly` or Make `BuildVS` modes. The original
+`lunyue/songqing-bazel-cache-ci` branch remains unchanged.
 
 For native builds, set `cacheOnly=false` and select:
 
 | `nativeTarget` | Build and proof |
 | --- | --- |
-| `docker-sysmgr` | Compile the native OCI target and upload synchronously, then use fresh output roots with disk cache disabled to require matching C++ action remote hits and identical, checksum-verified OCI output. |
+| `docker-sysmgr` | Build the native OCI target once with remote reads and writes enabled, fresh output roots and disk cache disabled; require remote hits from an earlier CI run and checksum-verify the OCI output. |
 | `sonic-vs-bin` | Build the full VS/amd64 installer with remote reads and writes, verify its payload and ZIP, and publish the installer plus cache statistics. |
 
 The YAML repository is the CI control plane, not the product source. Each native
@@ -23,6 +25,29 @@ tool dependency and pins Rust `swss-common` to the locally tested commit
 `60a1716be38d648c634ebffab547bbd5a67c8ef8`. Both Cargo manifests and lockfiles
 are pinned so `master` cannot change between cache passes. Their checksums are
 checked after each build. Artifacts record source, control and patch revisions.
+
+There is no cold compilation or second build within this job. The isolated HOME,
+source, output roots and repository cache are created afresh for each invocation;
+CI pool allocation decides the Agent VM. The cache instance stays unchanged.
+The warm build uses `--remote_accept_cached=true` and
+`--remote_upload_local_results=true`, so misses execute locally and populate
+the server.
+
+`cache-validation.json` records Bazel wall, analysis and execution times plus
+runner counts from Bazel 8.6.0's build-event protocol. It requires a successful
+finished event, positive remote hits and no disk-cache hits. The benchmark
+does not generate the large per-spawn JSON logs whose repeated parsing took
+about 40 minutes in run 1245568. It does not claim per-C++ action digest proof;
+that remains the separate cold/write-read gate on the original branch.
+`warm-command-timing.json` also records the complete Bazel process wall time,
+including startup and shutdown, at one-second resolution. BEP timing excludes
+some startup/shutdown overhead; keep these measurements distinct.
+
+The comparison baseline is run 1245568: the forced-local write build took
+2976.141 seconds, while its same-job clean-output remote read took 134.238
+seconds. A new CI also pays for source/dependency downloads and analysis;
+report its actual Bazel and total CI times separately rather than assuming
+the same-job result predicts cross-VM performance.
 
 The native job reuses `SONiC-Bazel-Cache`, `BAZEL_REMOTE_CACHE_URL`,
 `sonic-bazel-cache-ci-certs.tar.gz`, and instance
@@ -41,7 +66,7 @@ select it in **Run pipeline**, or queue the same run with an authenticated CLI:
 ```bash
 az pipelines run \
   --organization https://dev.azure.com/mssonic --project build --id 3430 \
-  --branch lunyue/songqing-bazel-cache-ci \
+  --branch lunyue/songqing-bazel-warm-cache-ci \
   --parameters cacheOnly=false nativeTarget=docker-sysmgr
 ```
 
@@ -50,9 +75,9 @@ Prefer `--commit-id <published-CI-commit>` to pin the queued YAML revision.
 Do not publish or queue additional runs without authorization.
 
 The Docker artifact is a self-contained OCI archive, not a Docker-save archive.
-Raw execution logs, connection RCs and credentials are not published; filtered
-cache evidence and verified outputs are. A VS run publishes `sonic-vs.bin`, not
-the traditional Make-generated `sonic-vs.img.gz`.
+Raw execution/build-event logs, connection RCs and credentials are not
+published; filtered cache evidence and verified outputs are. A VS run publishes
+`sonic-vs.bin`, not the traditional Make-generated `sonic-vs.img.gz`.
 
 `DockerOverlay2Store` has a `local` execution requirement and cannot remotely
 cache. Its local assembly is expected even on a warmed server. Full-build

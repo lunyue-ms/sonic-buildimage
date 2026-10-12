@@ -9,7 +9,7 @@ parameters:
 - name: nativeTarget
   displayName: Songqing native Bazel target (none keeps the existing modes)
   type: string
-  default: none
+  default: docker-sysmgr
   values:
   - none
   - docker-sysmgr
@@ -172,7 +172,7 @@ stages:
           CLIENT_CERT_ARCHIVE: $(bazelCacheCerts.secureFilePath)
 - ${{ if ne(parameters.nativeTarget, 'none') }}:
   - stage: NativeBazel
-    displayName: Songqing native Bazel build and remote cache
+    displayName: Songqing native Bazel cross-run cache benchmark
     pool: sonicso1ES-amd64
     jobs:
     - job: NativeBuild
@@ -198,7 +198,7 @@ stages:
       - bash: |
           set -euo pipefail
           bash tools/bazel/ci/songqing_native.sh "$NATIVE_TARGET"
-        displayName: Build songqing target and verify remote cache
+        displayName: Build songqing target using existing remote cache
         env:
           NATIVE_TARGET: ${{ parameters.nativeTarget }}
           BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)

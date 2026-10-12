@@ -39,8 +39,8 @@ echo "Native target=$target jobs=$jobs available_disk=${available_gib}GiB"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source_sha=63a88233694c85056096bc34843af39c5cedfcc6
 run_root="$(mktemp -d "$AGENT_TEMPDIRECTORY/songqing-native.XXXXXXXX")"
-# Keep the kernel's Speakup paths below its 256-byte fixed buffer.
-sandbox_root="$(mktemp -d /tmp/sq.XXXXXXXX)"
+# Budget for Bazel's hash and seven-digit sandbox IDs in Speakup's 256-byte buffer.
+sandbox_root="$(mktemp -d /tmp/XXXXXX)"
 cert_dir="$run_root/certs"
 remote_rc="$run_root/remote.bazelrc"
 cleanup() {

@@ -4,7 +4,8 @@ Pipeline 3430 uses `.azure-pipelines/azure-pipelines-bazel-cache.yml`.
 This dedicated `lunyue/songqing-bazel-warm-cache-ci` branch defaults
 `nativeTarget` to `sonic-vs-bin` while full VS closed-loop validation is running.
 A temporary batched GitHub push trigger is restricted to this branch and changes
-to `.azure-pipelines/azure-pipelines-bazel-cache.yml`; PR triggers remain disabled.
+to `.azure-pipelines/azure-pipelines-bazel-cache.yml` or `tools/bazel/ci/*`; PR
+triggers remain disabled.
 This uses pipeline 3430's existing GitHub connection, without changing Azure
 authentication or permissions. Restore `trigger: none` after validation. Select
 `docker-sysmgr` explicitly for the Docker benchmark or `none` for the existing
@@ -79,10 +80,21 @@ The native workspace RC remains enabled; only unrelated system/home RCs are
 disabled. Git/Cargo use an isolated HOME and Git CLI; the kernel uses a short
 sandbox path and the locally validated timeout scale.
 
+The sandbox is an atomically allocated, mode-0700 `/tmp/XXXXXX` directory.
+Speakup's host `makemapdata` tool builds input filenames in a 256-byte buffer.
+In full VS run 1246066, the old `/tmp/sq.XXXXXXXX` prefix and sandbox ID 10565
+produced a 258-byte `spk_priv_keyinfo.h` path; the tool silently truncated it and
+the kernel action failed. The shorter prefix keeps that path at 253 bytes and
+even a seven-digit sandbox ID at 255 bytes, leaving room for the NUL terminator.
+An isolated regression with the actual kernel tool reproduces the old failure
+and generates byte-identical headers at short, five-digit and seven-digit IDs
+with the corrected prefix. This changes neither kernel source/configuration nor
+timeouts, cache settings or certificate isolation.
+
 ## Run
 
-During full VS validation, an authorized push that changes the CI YAML on this
-branch queues a full VS build with `cacheOnly=false` and
+During full VS validation, an authorized push that changes the CI YAML or native
+CI inputs on this branch queues a full VS build with `cacheOnly=false` and
 `nativeTarget=sonic-vs-bin`. Confirm the actual run's source revision in pipeline
 3430 before manually queueing another run.
 

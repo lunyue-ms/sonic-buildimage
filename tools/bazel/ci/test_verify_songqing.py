@@ -3,6 +3,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -216,6 +217,26 @@ class NativeVerificationTests(unittest.TestCase):
                                 env={"PATH": os.environ["PATH"]})
         self.assertEqual(result.returncode, 1)
         self.assertIn("Unsupported native target", result.stderr)
+
+    def test_private_sandbox_reserves_speakup_path_budget(self):
+        script = pathlib.Path(__file__).with_name("songqing_native.sh")
+        match = re.search(r'^sandbox_root="\$\(mktemp -d ([^\s)]+)\)"$',
+                          script.read_text(), re.M)
+        self.assertIsNotNone(match)
+        sandbox = pathlib.Path(subprocess.check_output(
+            ["/usr/bin/mktemp", "-d", match.group(1)], text=True,
+        ).strip())
+        self.addCleanup(sandbox.rmdir)
+        self.assertEqual(sandbox.stat().st_mode & 0o777, 0o700)
+        for counter in (1, 10565, 9999999):
+            path = sandbox / (
+                "bazel-sandbox." + "a" * 64
+                + "/processwrapper-sandbox/{}/execroot/_main/external/"
+                "sonic-linux-kernel++_repo_rules+kernel_sources/linux-6.12.41/"
+                "drivers/accessibility/speakup/spk_priv_keyinfo.h"
+            ).format(counter)
+            with self.subTest(counter=counter):
+                self.assertLess(len(os.fsencode(path)), 256)
 
     def test_controlled_patch_passes_p4c_bison_toolchain_environment(self):
         target = self.root / "src/p4lang/p4c-native-bazel.patch"

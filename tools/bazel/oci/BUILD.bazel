@@ -15,3 +15,18 @@ py_test(
     srcs = ["docker_archive_to_oci_layout_test.py"],
     data = [":docker_archive_to_oci_layout"],
 )
+
+py_binary(
+    name = "manifest_to_labels",
+    srcs = ["manifest_to_labels.py"],
+)
+
+py_test(
+    name = "manifest_to_labels_test",
+    size = "small",
+    srcs = [
+        "manifest_to_labels.py",
+        "manifest_to_labels_test.py",
+    ],
+    imports = ["."],
+)

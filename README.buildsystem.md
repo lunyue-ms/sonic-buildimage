@@ -228,6 +228,66 @@ When building, you can use the `BAZEL_MIN_READINESS` configuration knob (defined
 | `experimental` | those declaring `experimental` or `stable` |
 | `stable` | those declaring `stable` |
 
+### Bazel manifests and remote cache validation
+
+The Bazel Make recipes render the same manifest template and optional partial
+manifest as the legacy Docker recipes. They write independent
+`target/<docker>.manifest.json` and `target/<docker>-dbg.manifest.json` inputs.
+The OCI label conversion is a declared Bazel action: version, service ordering,
+container options, CLI plugins and debug build metadata are not hardcoded.
+When invoking Bazel directly, first build the Make base archive and both
+manifest targets.
+
+`SONIC_BAZEL_REMOTE_CACHE_CONFIG=/absolute/path/to/cache.bazelrc` optionally mounts
+a readable host RC at `/etc/sonic-bazel-remote.bazelrc`, read-only. The slave
+system RC imports it. Mount any certificate files separately with
+`DOCKER_BUILDER_USER_MOUNT`; never put credentials in the checkout. A configured
+remote RC with a missing file or unusable per-user cache directory fails rather
+than silently building without the requested cache. Unconfigured builds keep
+their existing local-cache behavior.
+
+`.azure-pipelines/azure-pipelines-bazel-cache.yml` is a **manual-only** validation
+pipeline based on PR #28005 head `4904e6bc67c279a29f2aafd6541412b76d235687`
+and local follow-up commits. It checks out that validation branch itself, with
+its recorded submodules; it neither fetches songqing sources nor imports
+templates from another branch. It reuses the `SONiC-Bazel-Cache` variable group,
+`BAZEL_REMOTE_CACHE_URL`, and the existing
+`sonic-bazel-cache-ci-certs.tar.gz` Secure File. No cache service, TLS or
+authorization changes are required.
+
+The job uses `BAZEL_MIN_READINESS=experimental`, trixie/amd64, and
+`SONIC_DPKG_CACHE_METHOD=none`. It builds the config-engine base once with Make,
+then runs real sysmgr normal/debug Bazel builds in two fresh output roots:
+the write pass disables remote reads and uploads synchronously; the read pass
+disables uploads and reads the remote cache. Disk caching and remote execution
+are disabled. The gate requires matching action digests and genuine remote
+hits for **every recorded cacheable sysmgr CppCompile**, complete manifest-label
+equality, identical cold/warm archives, and successful BEP timing events.
+Repository downloads may be shared; they are not counted as compile-cache hits.
+Execution logs are streamed once per pass and are not published.
+
+After the cache gate, the job builds `target/sonic-vs.img.gz` through the normal
+Make path, retaining the base archive already produced in this job with
+`--old-file` forwarded through `SONIC_BUILD_VARS`. This prevents the phony
+`docker-start` prerequisite from rebuilding a time-varying base between proof
+and integration; it does not reuse a dpkg/image cache. The job checks gzip
+integrity and requires its sysmgr archive to match the validated warm result.
+**Only sysmgr is selected for Bazel by this PR**; the
+base, other containers and image assembly remain Make-built. Published outputs
+are selected images, generated manifests, source/submodule provenance and a
+sanitized cache/timing report. This is build integration evidence, not boot,
+runtime, upgrade, FIPS or cross-Agent cache acceptance. Publishing the branch
+and queuing this pipeline require separate authorization.
+
+Focused local regressions (without a cache connection or full image build):
+
+```sh
+python3 -m pytest -q tools/bazel/ci/pr28005_cache_test.py \
+    tools/bazel/oci/manifest_to_labels_test.py \
+    tools/bazel/oci/docker_archive_to_oci_layout_test.py
+shellcheck tools/bazel/ci/pr28005_cache_ci.sh tools/bazel/ci/validate_pr28005_cache.sh
+```
+
 ## Tips & Tricks
 Although every target is built inside a sonic-slave container, which exits at the end of build, you can enter bash of sonic-slave using this command:
 ```

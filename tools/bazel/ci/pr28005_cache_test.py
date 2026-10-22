@@ -385,6 +385,47 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("SONIC_BUILD_VARS=--old-file=target/docker-config-engine-trixie.gz", host)
         self.assertNotIn("songqing_native", host)
 
+    def test_private_cache_cleanup_handles_readonly_directories(self):
+        host = (ROOT / "tools/bazel/ci/pr28005_cache_ci.sh").read_text()
+        cleanup = host.split(
+            'run_root="$(mktemp -d "$AGENT_TEMPDIRECTORY/pr28005-cache.XXXXXXXX")"\n', 1
+        )[1].split("umask 077\n", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "keep.txt").write_text("outside the private cache")
+            outside.chmod(0o555)
+            try:
+                for status in (0, 7):
+                    with self.subTest(status=status):
+                        run_root = root / f"run-{status}"
+                        sdk = run_root / "cache/python-sdk/lib"
+                        sdk.mkdir(parents=True)
+                        module = sdk / "module.py"
+                        module.write_text("pass\n")
+                        module.chmod(0o444)
+                        sdk.chmod(0o555)
+                        (run_root / "external-link").symlink_to(
+                            outside, target_is_directory=True
+                        )
+                        result = subprocess.run(
+                            [
+                                "bash", "-c",
+                                'set -euo pipefail\nrun_root="$1"\n' + cleanup + '\nexit "$2"',
+                                "cleanup-test", str(run_root), str(status),
+                            ],
+                            capture_output=True, text=True,
+                        )
+                        self.assertEqual(result.returncode, status, result.stderr)
+                        self.assertFalse(run_root.exists())
+                        self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
+                        self.assertEqual(
+                            (outside / "keep.txt").read_text(), "outside the private cache"
+                        )
+            finally:
+                outside.chmod(0o755)
+
 
 if __name__ == "__main__":
     unittest.main()

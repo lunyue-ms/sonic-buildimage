@@ -30,7 +30,14 @@ if grep -qE '^[+U-]' "$PR28005_RESULTS_DIR/submodules.txt"; then
 fi
 
 run_root="$(mktemp -d "$AGENT_TEMPDIRECTORY/pr28005-cache.XXXXXXXX")"
-trap 'rm -rf "$run_root"' EXIT
+cleanup() {
+    local status=$?
+    # Hermetic SDK directories can be read-only; do not follow cache symlinks.
+    find "$run_root" -type d -exec chmod u+w {} +
+    rm -rf -- "$run_root"
+    return "$status"
+}
+trap cleanup EXIT
 umask 077
 mkdir "$run_root/certs" "$run_root/cache"
 members="$(tar -tzf "$CLIENT_CERT_ARCHIVE")"

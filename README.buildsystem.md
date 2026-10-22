@@ -255,6 +255,10 @@ templates from another branch. It reuses the `SONiC-Bazel-Cache` variable group,
 `sonic-bazel-cache-ci-certs.tar.gz` Secure File. No cache service, TLS or
 authorization changes are required.
 
+Cleanup restores owner write permission on directories in the private temporary
+tree before removing it, since hermetic SDK directories can be read-only. It
+does not follow symlinks and preserves the original build exit status.
+
 The job uses `BAZEL_MIN_READINESS=experimental`, trixie/amd64, and
 `SONIC_DPKG_CACHE_METHOD=none`. It builds the config-engine base once with Make,
 then runs real sysmgr normal/debug Bazel builds in two fresh output roots:

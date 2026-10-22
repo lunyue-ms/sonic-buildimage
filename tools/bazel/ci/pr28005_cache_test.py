@@ -371,6 +371,18 @@ class ManifestMakeTest(unittest.TestCase):
 
 
 class PipelineTest(unittest.TestCase):
+    def test_uncached_vs_budget_and_canceled_evidence(self):
+        pipeline = yaml.safe_load(
+            (ROOT / ".azure-pipelines/azure-pipelines-bazel-cache.yml").read_text()
+        )
+        job = pipeline["jobs"][0]
+        self.assertEqual(job["timeoutInMinutes"], 600)
+        self.assertEqual(job["cancelTimeoutInMinutes"], 10)
+        self.assertEqual(
+            job["steps"][-1]["condition"],
+            "and(always(), eq(variables['PR28005_RESULTS_READY'], 'true'))",
+        )
+
     def test_manual_checkout_and_existing_cache_credentials(self):
         pipeline = yaml.safe_load(
             (ROOT / ".azure-pipelines/azure-pipelines-bazel-cache.yml").read_text()

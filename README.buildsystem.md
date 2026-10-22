@@ -285,6 +285,13 @@ sanitized cache/timing report. This is build integration evidence, not boot,
 runtime, upgrade, FIPS or cross-Agent cache acceptance. Publishing the branch
 and queuing this pipeline require separate authorization.
 
+The job has a 600-minute budget, matching the existing uncached image comparison
+jobs: the legacy Make kernel, other containers and installer are not accelerated
+by sysmgr's Bazel cache. A 10-minute cancellation grace allows cleanup and
+publication of existing sanitized evidence after cancellation or timeout.
+Publication still requires the results directory to have been created and does
+not turn an interrupted VS integration into a passing result.
+
 Focused local regressions (without a cache connection or full image build):
 
 ```sh

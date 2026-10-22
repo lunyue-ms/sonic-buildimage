@@ -14,7 +14,8 @@ variables:
 jobs:
 - job: PR28005Cache
   displayName: Sysmgr remote-cache proof and VS integration
-  timeoutInMinutes: 480
+  timeoutInMinutes: 600
+  cancelTimeoutInMinutes: 10
   steps:
   - checkout: self
     clean: true
@@ -35,7 +36,7 @@ jobs:
       PR28005_RESULTS_DIR: $(Build.ArtifactStagingDirectory)/pr28005-cache-$(Build.BuildId)
   - task: PublishPipelineArtifact@1
     displayName: Publish selected images and sanitized cache evidence
-    condition: and(succeededOrFailed(), eq(variables['PR28005_RESULTS_READY'], 'true'))
+    condition: and(always(), eq(variables['PR28005_RESULTS_READY'], 'true'))
     inputs:
       targetPath: $(Build.ArtifactStagingDirectory)/pr28005-cache-$(Build.BuildId)
       artifact: pr28005-cache

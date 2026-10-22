@@ -199,6 +199,13 @@ class CacheProofTest(unittest.TestCase):
 
 
 class CacheMountTest(unittest.TestCase):
+    def test_remote_configuration_does_not_leak_into_nested_workspaces(self):
+        remote_import = "try-import /etc/sonic-bazel-remote.bazelrc"
+        self.assertIn(remote_import, (ROOT / ".bazelrc").read_text().splitlines())
+        self.assertNotIn(
+            remote_import, (ROOT / "tools/bazel/slave.bazelrc").read_text().splitlines()
+        )
+
     def test_optional_mount_and_fail_closed_configuration(self):
         source = (ROOT / "Makefile.work").read_text()
         fragment = source.split("# Create a volume to store Bazel caches into\n", 1)[1]

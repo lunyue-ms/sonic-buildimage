@@ -239,8 +239,10 @@ When invoking Bazel directly, first build the Make base archive and both
 manifest targets.
 
 `SONIC_BAZEL_REMOTE_CACHE_CONFIG=/absolute/path/to/cache.bazelrc` optionally mounts
-a readable host RC at `/etc/sonic-bazel-remote.bazelrc`, read-only. The slave
-system RC imports it. Mount any certificate files separately with
+a readable host RC at `/etc/sonic-bazel-remote.bazelrc`, read-only. The root
+workspace `.bazelrc` imports it, not the slave system RC: nested workspaces such
+as `sonic-p4rt/sonic-pins` pin older Bazel versions that reject root-workspace
+remote options. Mount any certificate files separately with
 `DOCKER_BUILDER_USER_MOUNT`; never put credentials in the checkout. A configured
 remote RC with a missing file or unusable per-user cache directory fails rather
 than silently building without the requested cache. Unconfigured builds keep

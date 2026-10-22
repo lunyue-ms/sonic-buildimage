@@ -171,7 +171,7 @@ SONIC_DPKG_CACHE_SOURCE ?= /var/cache/sonic/artifacts
 #   - Disk cache: https://bazel.build/remote/caching#disk-cache
 SONIC_BAZEL_CACHE_SOURCE ?= $(SONIC_DPKG_CACHE_SOURCE)/bazel
 
-# Optional host-side RC, mounted read-only and imported by the slave system RC.
+# Optional host-side RC, mounted read-only for the root Bazel workspace.
 # Keep endpoints and credentials outside the checkout.
 SONIC_BAZEL_REMOTE_CACHE_CONFIG ?=
 

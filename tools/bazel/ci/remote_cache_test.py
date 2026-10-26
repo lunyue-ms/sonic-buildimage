@@ -626,6 +626,23 @@ class PipelineTest(unittest.TestCase):
             finally:
                 outside.chmod(0o755)
 
+    def test_nightly_template_paths_resolve_from_the_nested_entrypoint(self):
+        source = ROOT / ".azure-pipelines/azure-pipelines-bazel-nightly.yml"
+        nightly = yaml.safe_load(source.read_text())
+        templates = [nightly["stages"][0]["jobs"][0]["template"]]
+        templates.extend(item["template"] for item in nightly["variables"]
+                         if "template" in item)
+        templates.extend(job["steps"][-1]["template"]
+                         for job in nightly["stages"][1]["jobs"])
+        for template in templates:
+            with self.subTest(template=template):
+                path, _, repository = template.partition("@")
+                if not repository:
+                    resolved = (ROOT / path.lstrip("/") if path.startswith("/")
+                                else source.parent / path)
+                    self.assertTrue(resolved.is_file(), str(resolved))
+                self.assertTrue(path.startswith("/"), template)
+
     def test_nightly_uses_the_main_build_template_and_preserves_dpkg_cache(self):
         nightly = yaml.safe_load(
             (ROOT / ".azure-pipelines/azure-pipelines-bazel-nightly.yml").read_text()
@@ -641,7 +658,8 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(variables["ENABLE_FIPS"], "y")
         self.assertTrue(variables["BAZEL_REMOTE_CACHE_DIR"].startswith("$(Agent.TempDirectory)/"))
         build = nightly["stages"][0]["jobs"][0]
-        self.assertEqual(build["template"], main_build["jobs"][0]["template"])
+        self.assertEqual(build["template"].lstrip("/"),
+                         main_build["jobs"][0]["template"].lstrip("/"))
         params = build["parameters"]
         self.assertFalse(params["triggerArtifactPublish"])
         self.assertEqual([job["name"] for job in params["jobGroups"]], ["vs"])
@@ -695,7 +713,7 @@ class PipelineTest(unittest.TestCase):
             self.assertNotIn("continueOnError", job)
             step = job["steps"][-1]
             self.assertEqual(
-                step["template"], ".azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt"
+                step["template"], "/.azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt"
             )
             params = step["parameters"]
             self.assertEqual(params["TOPOLOGY"], topology)

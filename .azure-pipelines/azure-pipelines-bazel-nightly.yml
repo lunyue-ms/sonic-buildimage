@@ -26,8 +26,8 @@ resources:
     endpoint: sonic-net
 
 variables:
-- template: .azure-pipelines/azure-pipelines-repd-build-variables.yml@buildimage
-- template: .azure-pipelines/template-variables.yml@buildimage
+- template: /.azure-pipelines/azure-pipelines-repd-build-variables.yml@buildimage
+- template: /.azure-pipelines/template-variables.yml@buildimage
 - group: SONiC-Bazel-Cache
 - name: CACHE_MODE
   value: rcache
@@ -42,7 +42,7 @@ stages:
 - stage: BuildVS
   pool: sonicso1ES-amd64
   jobs:
-  - template: .azure-pipelines/azure-pipelines-build.yml
+  - template: /.azure-pipelines/azure-pipelines-build.yml
     parameters:
       buildOptions: >-
         USERNAME=admin SONIC_BUILD_JOBS=$(nproc)
@@ -121,7 +121,7 @@ stages:
         mgmt_commit="$(git rev-parse HEAD)"
         echo "##vso[task.setvariable variable=MGMT_COMMIT_HASH]$mgmt_commit"
       displayName: Record the resolved test-code revision
-    - template: .azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
+    - template: /.azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
       parameters:
         TOPOLOGY: t0
         TEST_SET: t0
@@ -146,7 +146,7 @@ stages:
         mgmt_commit="$(git rev-parse HEAD)"
         echo "##vso[task.setvariable variable=MGMT_COMMIT_HASH]$mgmt_commit"
       displayName: Record the resolved test-code revision
-    - template: .azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
+    - template: /.azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
       parameters:
         TOPOLOGY: t1-lag
         TEST_SET: t1-lag

@@ -7,6 +7,9 @@ parameters:
 - name: 'preSteps'
   type: stepList
   default: []
+- name: 'postCheckoutSteps'
+  type: stepList
+  default: []
 - name: 'buildSteps'
   type: stepList
   default: []
@@ -25,6 +28,9 @@ parameters:
 - name: COMMIT_ID
   type: string
   default: ''
+- name: triggerArtifactPublish
+  type: boolean
+  default: true
 jobs:
 - template: azure-pipelines-job-groups.yml
   parameters:
@@ -59,6 +65,7 @@ jobs:
             echo "No specific commit id provided, checkout to latest commit"
           fi
         displayName: 'Checkout commit'
+      - ${{ parameters.postCheckoutSteps }}
       - script: |
           set -ex
           sudo apt-get update
@@ -143,7 +150,7 @@ jobs:
         condition: or(failed(), canceled())
         artifact: 'sonic-buildimage.$(GROUP_NAME)$(GROUP_EXTNAME)$(System.JobAttempt)'
         displayName: "Archive failed sonic image"
-      - ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+      - ${{ if and(parameters.triggerArtifactPublish, ne(variables['Build.Reason'], 'PullRequest')) }}:
         - template: trigger-publish-artifacts-build.yml
           parameters:
             artifactName: 'sonic-buildimage.$(GROUP_NAME)$(GROUP_EXTNAME)'

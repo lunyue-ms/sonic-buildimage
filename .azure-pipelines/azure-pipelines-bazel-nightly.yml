@@ -1,0 +1,163 @@
+# Non-blocking build-and-test coverage based on azure-pipelines.yml.
+trigger: none
+pr: none
+
+schedules:
+- cron: "0 8 * * *"
+  displayName: Daily Bazel VS build and test
+  branches:
+    include:
+    - master
+  always: true
+
+name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+resources:
+  repositories:
+  - repository: sonic-mgmt
+    type: github
+    name: sonic-net/sonic-mgmt
+    ref: master
+    endpoint: sonic-net
+  - repository: buildimage
+    type: github
+    name: sonic-net/sonic-buildimage
+    ref: master
+    endpoint: sonic-net
+
+variables:
+- template: .azure-pipelines/azure-pipelines-repd-build-variables.yml@buildimage
+- template: .azure-pipelines/template-variables.yml@buildimage
+- group: SONiC-Bazel-Cache
+- name: CACHE_MODE
+  value: rcache
+- name: ENABLE_FIPS
+  value: y
+- name: BAZEL_REMOTE_INSTANCE_NAME
+  value: sonic-buildimage/e2e/trixie-amd64
+- name: BAZEL_REMOTE_CACHE_DIR
+  value: $(Agent.TempDirectory)/sonic-bazel-cache-$(System.JobId)-$(System.JobAttempt)
+
+stages:
+- stage: BuildVS
+  pool: sonicso1ES-amd64
+  jobs:
+  - template: .azure-pipelines/azure-pipelines-build.yml
+    parameters:
+      buildOptions: >-
+        USERNAME=admin SONIC_BUILD_JOBS=$(nproc)
+        BUILD_MULTIASIC_KVM=y INCLUDE_DHCP_SERVER=y
+        ${{ variables.VERSION_CONTROL_OPTIONS }}
+        BLDENV=trixie NOBOOKWORM=1 NOTRIXIE=0 COMMON_LIB_BUILD_ENVS=trixie
+        BAZEL_MIN_READINESS=experimental
+        SONIC_BAZEL_CACHE_SOURCE=$(BAZEL_REMOTE_CACHE_DIR)/cache
+        SONIC_BAZEL_REMOTE_CACHE_CONFIG=$(BAZEL_REMOTE_CACHE_DIR)/remote.bazelrc
+        DOCKER_BUILDER_USER_MOUNT=$(BAZEL_REMOTE_CACHE_DIR)/certs:/etc/sonic-bazel-certs:ro
+      triggerArtifactPublish: false
+      jobGroups:
+      - name: vs
+        cancelTimeoutInMinutes: 10
+      preSteps:
+      - task: DownloadSecureFile@1
+        name: bazelCacheCerts
+        displayName: Download cache client certificates
+        inputs:
+          secureFile: sonic-bazel-cache-ci-certs.tar.gz
+      postCheckoutSteps:
+      - bash: bash tools/bazel/ci/configure_remote_cache.sh "$BAZEL_REMOTE_CACHE_DIR"
+        displayName: Configure scoped Bazel remote cache
+        env:
+          BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)
+          BAZEL_REMOTE_INSTANCE_NAME: $(BAZEL_REMOTE_INSTANCE_NAME)
+          BAZEL_REMOTE_CACHE_DIR: $(BAZEL_REMOTE_CACHE_DIR)
+          CLIENT_CERT_ARCHIVE: $(bazelCacheCerts.secureFilePath)
+      postSteps:
+      - bash: |
+          set -euo pipefail
+          gzip -t "$TARGET_DIR/sonic-vs.img.gz"
+          python3 tools/bazel/ci/verify_remote_cache.py nightly \
+              "$TARGET_DIR" "$REPORT_PATH"
+        displayName: Verify Bazel selection and record VS provenance
+        env:
+          TARGET_DIR: $(Build.ArtifactStagingDirectory)/target
+          REPORT_PATH: $(Build.ArtifactStagingDirectory)/bazel-nightly.json
+      - publish: $(Build.ArtifactStagingDirectory)/bazel-nightly.json
+        artifact: bazel-nightly
+        displayName: Archive sanitized Bazel nightly evidence
+      - bash: |
+          set -euo pipefail
+          cache_dir="${BAZEL_REMOTE_CACHE_DIR:?}"
+          expected="$AGENT_TEMPDIRECTORY/sonic-bazel-cache-${SYSTEM_JOBID:?}-${SYSTEM_JOBATTEMPT:?}"
+          if [[ "$cache_dir" != "$expected" ]]; then
+              echo "Refusing to clean an unexpected cache directory" >&2
+              exit 1
+          fi
+          if [[ -L "$cache_dir" ]]; then
+              echo "Refusing to clean a symlinked cache directory" >&2
+              exit 1
+          fi
+          if [[ -d "$cache_dir" ]]; then
+              find "$cache_dir" -type d -exec chmod u+w {} +
+              rm -rf -- "$cache_dir"
+          fi
+        displayName: Remove private cache credentials and SDKs
+        condition: always()
+        env:
+          BAZEL_REMOTE_CACHE_DIR: $(BAZEL_REMOTE_CACHE_DIR)
+
+- stage: Test
+  dependsOn: BuildVS
+  condition: succeeded()
+  variables:
+  - group: SONiC-Elastictest
+  jobs:
+  - job: t0_elastictest
+    pool: sonic-ubuntu-1c
+    timeoutInMinutes: 640
+    steps:
+    - checkout: sonic-mgmt
+    - bash: |
+        set -euo pipefail
+        mgmt_commit="$(git rev-parse HEAD)"
+        echo "##vso[task.setvariable variable=MGMT_COMMIT_HASH]$mgmt_commit"
+      displayName: Record the resolved test-code revision
+    - template: .azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
+      parameters:
+        TOPOLOGY: t0
+        TEST_SET: t0
+        TEST_PLAN_TYPE: PR
+        BUILD_REASON: $(Build.Reason)
+        MGMT_BRANCH: master
+        MGMT_COMMIT_HASH: $(MGMT_COMMIT_HASH)
+        KVM_BUILD_ID: $(Build.BuildId)
+        KVM_IMAGE_BUILD_PIPELINE_ID: $(System.DefinitionId)
+        MIN_WORKER: "1"
+        MAX_WORKER: "1"
+        MAX_RUN_TEST_MINUTES: 480
+        TEST_PLAN_NUM: "1"
+        EXPECTED_RESULT: SUCCESS
+  - job: t1_lag_elastictest
+    pool: sonic-ubuntu-1c
+    timeoutInMinutes: 640
+    steps:
+    - checkout: sonic-mgmt
+    - bash: |
+        set -euo pipefail
+        mgmt_commit="$(git rev-parse HEAD)"
+        echo "##vso[task.setvariable variable=MGMT_COMMIT_HASH]$mgmt_commit"
+      displayName: Record the resolved test-code revision
+    - template: .azure-pipelines/run-test-elastictest-template.yml@sonic-mgmt
+      parameters:
+        TOPOLOGY: t1-lag
+        TEST_SET: t1-lag
+        TEST_PLAN_TYPE: PR
+        BUILD_REASON: $(Build.Reason)
+        MGMT_BRANCH: master
+        MGMT_COMMIT_HASH: $(MGMT_COMMIT_HASH)
+        KVM_BUILD_ID: $(Build.BuildId)
+        KVM_IMAGE_BUILD_PIPELINE_ID: $(System.DefinitionId)
+        MIN_WORKER: "1"
+        MAX_WORKER: "1"
+        MAX_RUN_TEST_MINUTES: 480
+        TEST_PLAN_NUM: "1"
+        EXPECTED_RESULT: SUCCESS

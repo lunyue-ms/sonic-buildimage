@@ -10,6 +10,9 @@ parameters:
 - name: 'preSteps'
   type: stepList
   default: []
+- name: 'postCheckoutSteps'
+  type: stepList
+  default: []
 - name: 'postSteps'
   type: stepList
   default: []
@@ -25,13 +28,18 @@ parameters:
 - name: COMMIT_ID
   type: string
   default: ''
+- name: triggerArtifactPublish
+  type: boolean
+  default: true
 
 jobs:
 - template: azure-pipelines-image-template.yml
   parameters:
     jobFilters: ${{ parameters.jobFilters }}
     preSteps: ${{ parameters.preSteps }}
+    postCheckoutSteps: ${{ parameters.postCheckoutSteps }}
     postSteps: ${{ parameters.postSteps }}
+    triggerArtifactPublish: ${{ parameters.triggerArtifactPublish }}
     SUBMODULE: ${{ parameters.SUBMODULE }}
     COMMIT_ID: ${{ parameters.COMMIT_ID }}
     jobVariables:
@@ -235,4 +243,3 @@ jobs:
           BuildDropPath: '$(System.DefaultWorkingDirectory)/target/'
           ManifestDirPath: 'target/'
           BuildComponentPath: $(System.DefaultWorkingDirectory)/src/
-

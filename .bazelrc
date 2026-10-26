@@ -1,3 +1,6 @@
+# Nested workspaces can pin older Bazel versions with incompatible remote flags.
+try-import /etc/sonic-bazel-remote.bazelrc
+
 try-import %workspace%/tools/bazel/common.bazelrc
 
 # Always build our own src/ modules from the checked-out tree, regardless of

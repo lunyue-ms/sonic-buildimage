@@ -1550,9 +1550,18 @@ SONIC_TARGET_LIST += $(addprefix $(TARGET_PATH)/, $(DOCKER_IMAGES))
 .PHONY: FORCE_BAZEL
 FORCE_BAZEL:
 
+# Keep normal and debug metadata separate: the debug OCI image also analyzes
+# the normal image, so overwriting its manifest would label both as debug.
+$(addprefix $(TARGET_PATH)/, $(patsubst %.gz,%.manifest.json,$(SONIC_BAZEL_DOCKER_IMAGES))) : $(TARGET_PATH)/%.manifest.json : .platform FORCE_BAZEL
+	$(call generate_manifest,$*,,$@)
+
+$(addprefix $(TARGET_PATH)/, $(patsubst %.gz,%.manifest.json,$(SONIC_BAZEL_DBG_DOCKER_IMAGES))) : $(TARGET_PATH)/%-$(DBG_IMAGE_MARK).manifest.json : .platform FORCE_BAZEL
+	$(call generate_manifest,$*,dbg,$@)
+
 # Targets for building docker images (and debug images) with Bazel.
 $(addprefix $(TARGET_PATH)/, $(SONIC_BAZEL_DOCKER_IMAGES)) : $(TARGET_PATH)/%.gz : .platform \
 		$$(addprefix $(TARGET_PATH)/,$$($$*.gz_BAZEL_BASE)) \
+		$(TARGET_PATH)/$$*.manifest.json \
 		FORCE_BAZEL
 	$(HEADER)
 	bazel build //dockers/$*:$*.gz $(LOG)
@@ -1562,6 +1571,8 @@ $(addprefix $(TARGET_PATH)/, $(SONIC_BAZEL_DOCKER_IMAGES)) : $(TARGET_PATH)/%.gz
 
 $(addprefix $(TARGET_PATH)/, $(SONIC_BAZEL_DBG_DOCKER_IMAGES)) : $(TARGET_PATH)/%-$(DBG_IMAGE_MARK).gz : .platform \
 		$$(addprefix $(TARGET_PATH)/,$$($$*.gz_BAZEL_BASE)) \
+		$(TARGET_PATH)/$$*.manifest.json \
+		$(TARGET_PATH)/$$*-$(DBG_IMAGE_MARK).manifest.json \
 		FORCE_BAZEL
 	$(HEADER)
 	bazel build //dockers/$*:$*-$(DBG_IMAGE_MARK).gz $(LOG)

@@ -1,0 +1,42 @@
+# Manual remote-cache validation and VS build integration.
+pr: none
+trigger: none
+
+name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+pool: sonicso1ES-amd64
+
+variables:
+- group: SONiC-Bazel-Cache
+- name: CACHE_MODE
+  value: none
+
+jobs:
+- job: RemoteCacheValidation
+  displayName: Sysmgr remote-cache proof and VS integration
+  timeoutInMinutes: 600
+  cancelTimeoutInMinutes: 10
+  steps:
+  - checkout: self
+    clean: true
+    fetchDepth: 0
+    submodules: recursive
+  - task: DownloadSecureFile@1
+    name: bazelCacheCerts
+    displayName: Download existing cache client certificates
+    inputs:
+      secureFile: sonic-bazel-cache-ci-certs.tar.gz
+  - bash: |
+      set -euo pipefail
+      bash tools/bazel/ci/remote_cache_ci.sh
+    displayName: Validate real sysmgr cache hits, then build VS
+    env:
+      BAZEL_REMOTE_CACHE_URL: $(BAZEL_REMOTE_CACHE_URL)
+      CLIENT_CERT_ARCHIVE: $(bazelCacheCerts.secureFilePath)
+      BAZEL_CACHE_RESULTS_DIR: $(Build.ArtifactStagingDirectory)/bazel-remote-cache-$(Build.BuildId)
+  - task: PublishPipelineArtifact@1
+    displayName: Publish selected images and sanitized cache evidence
+    condition: and(always(), eq(variables['BAZEL_CACHE_RESULTS_READY'], 'true'))
+    inputs:
+      targetPath: $(Build.ArtifactStagingDirectory)/bazel-remote-cache-$(Build.BuildId)
+      artifact: bazel-remote-cache

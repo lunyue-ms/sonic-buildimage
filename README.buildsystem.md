@@ -228,6 +228,138 @@ When building, you can use the `BAZEL_MIN_READINESS` configuration knob (defined
 | `experimental` | those declaring `experimental` or `stable` |
 | `stable` | those declaring `stable` |
 
+### Bazel manifests and remote cache validation
+
+The Bazel Make recipes render the same manifest template and optional partial
+manifest as the legacy Docker recipes. They write independent
+`target/<docker>.manifest.json` and `target/<docker>-dbg.manifest.json` inputs.
+The OCI label conversion is a declared Bazel action: version, service ordering,
+container options, CLI plugins and debug build metadata are not hardcoded.
+When invoking Bazel directly, first build the Make base archive and both
+manifest targets.
+
+`SONIC_BAZEL_REMOTE_CACHE_CONFIG=/absolute/path/to/cache.bazelrc` optionally mounts
+a readable host RC at `/etc/sonic-bazel-remote.bazelrc`, read-only. The root
+workspace `.bazelrc` imports it, not the slave system RC: nested workspaces such
+as `sonic-p4rt/sonic-pins` pin older Bazel versions that reject root-workspace
+remote options. Mount any certificate files separately with
+`DOCKER_BUILDER_USER_MOUNT`; never put credentials in the checkout. A configured
+remote RC with a missing file or unusable per-user cache directory fails rather
+than silently building without the requested cache. Unconfigured builds keep
+their existing local-cache behavior.
+
+`.azure-pipelines/azure-pipelines-bazel-cache.yml` is a **manual-only** validation
+pipeline. It builds the selected checkout and its recorded submodules, without
+requiring a historical PR commit to remain in its ancestry. It reuses the
+`SONiC-Bazel-Cache` variable group,
+`BAZEL_REMOTE_CACHE_URL`, and the existing
+`sonic-bazel-cache-ci-certs.tar.gz` Secure File. No cache service, TLS or
+authorization changes are required.
+
+Cleanup restores owner write permission on directories in the private temporary
+tree before removing it, since hermetic SDK directories can be read-only. It
+does not follow symlinks and preserves the original build exit status.
+
+The job uses `BAZEL_MIN_READINESS=experimental`, trixie/amd64, and
+`SONIC_DPKG_CACHE_METHOD=none`. It builds the config-engine base once with Make,
+then runs real sysmgr normal/debug Bazel builds in two fresh output roots:
+the write pass disables remote reads and uploads synchronously; the read pass
+disables uploads and reads the remote cache. Disk caching and remote execution
+are disabled. The gate requires matching action digests and genuine remote
+hits for **every recorded cacheable sysmgr CppCompile**, complete manifest-label
+equality, identical cold/warm archives, and successful BEP timing events.
+Repository downloads may be shared; they are not counted as compile-cache hits.
+Execution logs are streamed once per pass and are not published.
+
+After the cache gate, the job builds `target/sonic-vs.img.gz` through the normal
+Make path, retaining the base archive already produced in this job with
+`--old-file` forwarded through `SONIC_BUILD_VARS`. This prevents the phony
+`docker-start` prerequisite from rebuilding a time-varying base between proof
+and integration; it does not reuse a dpkg/image cache. The job checks gzip
+integrity and requires its sysmgr archive to match the validated warm result.
+**The current migration selects sysmgr for Bazel**; the
+base, other containers and image assembly remain Make-built. Published outputs
+are selected images, generated manifests, source/submodule provenance and a
+sanitized cache/timing report. This is build integration evidence, not boot,
+runtime, upgrade, FIPS or cross-Agent cache acceptance. Publishing the branch
+and queuing this pipeline require separate authorization.
+
+The job has a 600-minute budget, matching the existing uncached image comparison
+jobs: the legacy Make kernel, other containers and installer are not accelerated
+by sysmgr's Bazel cache. A 10-minute cancellation grace allows cleanup and
+publication of existing sanitized evidence after cancellation or timeout.
+Publication still requires the results directory to have been created and does
+not turn an interrupted VS integration into a passing result.
+
+Focused local regressions (without a cache connection or full image build):
+
+```sh
+python3 -m pytest -q tools/bazel/ci/remote_cache_test.py \
+    tools/bazel/oci/manifest_to_labels_test.py \
+    tools/bazel/oci/docker_archive_to_oci_layout_test.py
+shellcheck tools/bazel/ci/configure_remote_cache.sh \
+    tools/bazel/ci/remote_cache_ci.sh tools/bazel/ci/validate_remote_cache.sh
+```
+
+### Bazel VS nightly
+
+`.azure-pipelines/azure-pipelines-bazel-nightly.yml` follows the `BuildVS` and
+Elastictest path in `azure-pipelines.yml`. It schedules master daily at 08:00 UTC,
+disables push/PR triggers, and must not be registered as a required PR check.
+The initial scope is a normal VS/amd64/Trixie image, including the existing
+multi-ASIC build option and `ENABLE_FIPS=y`. ASAN, other build platforms and the
+remaining PR test topologies are not covered by this initial nightly.
+The selected source must contain the migrated Bazel rules; enabling a flag
+does not migrate an older Make-only checkout.
+
+The normal `CACHE_MODE=rcache` DPKG cache remains enabled. A private, writable
+Bazel cache and mTLS configuration are created outside the workspace by
+`tools/bazel/ci/configure_remote_cache.sh`. Only the root workspace imports the
+remote RC, so nested projects using older Bazel versions retain their existing
+behavior. Local disk caching is allowed; remote misses are normal and do not
+fail the nightly. The shared setup is also used by the stricter manual cache
+proof, whose cold-write/warm-read policy remains separate.
+
+The shared build template's `postCheckoutSteps` hook runs after the requested
+commit is checked out and before `make configure`. Existing `preSteps` retain
+their original order. Both hook defaults are empty. `triggerArtifactPublish`
+defaults to true for existing callers; the nightly sets it false to avoid
+queuing the additional external `publish-artifacts` pipeline. Standard ADO
+artifacts, including `sonic-buildimage.vs`, are still archived.
+
+After the build, the nightly requires the Make-generated sysmgr manifest,
+a successful Bazel build in its Make log, matching complete OCI manifest
+metadata, and a valid VS gzip archive. `bazel-nightly.json` records the source
+commit, Bazel version, build/pipeline IDs, sysmgr archive/config digests and
+the final VS image digest. Process/cache counts describe only the last
+sysmgr build recorded in that log, not all VS actions or C++ compilations.
+Remote-cache warnings are surfaced as pipeline warnings. These diagnostics
+do not replace the manual two-root remote-hit proof or prove the contents of
+a booted DUT.
+
+The test stage reuses sonic-mgmt's existing Elastictest lifecycle template
+for the t0 and t1-lag PR test sets. Each topology requests one worker and one
+plan, pins the test-code commit from the repository resource checkout, and
+requires `SUCCESS`. Both the KVM build ID and pipeline ID identify this exact
+nightly's standard VS artifact; no latest-master image is requested.
+Scheduled ADO execution intentionally uses the Elastictest `PR` plan type for
+its KVM pools, not a persistent `NIGHTLY` testbed schedule.
+
+Registering the pipeline and authorizing the existing variable groups,
+Secure File, GitHub endpoint and Elastictest service are separate operational
+steps. Cache-writer credentials must only be available to trusted CI.
+The shared sonic-mgmt template currently recognizes canonical public buildimage
+repository names when downloading test definitions; manually running it from
+a fork requires checking that routing before queueing, not overriding the
+built-in source identity. No pipeline registration or execution is performed
+by adding this YAML.
+
+Make/Bazel layout and permission comparisons, dependency-version drift gates,
+additional architectures and live full-pipeline acceptance remain separate
+follow-up work. The local regressions above also cover the nightly wiring,
+credential setup and sanitized evidence generation; they do not compile an
+ADO pipeline or execute a VS/FIPS/Elastictest run.
+
 ## Tips & Tricks
 Although every target is built inside a sonic-slave container, which exits at the end of build, you can enter bash of sonic-slave using this command:
 ```
